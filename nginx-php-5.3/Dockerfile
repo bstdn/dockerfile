@@ -33,6 +33,9 @@ RUN \
   apt-get install -y nginx && \
   chown -R www-data:www-data /var/lib/nginx
 
+# Define mountable directories.
+VOLUME ["/etc/nginx/sites-enabled", "/etc/nginx/certs", "/etc/nginx/conf.d", "/var/log/nginx", "/var/www/html"]
+
 # Install Php5-fpm.
 RUN \
   apt-get install -y php5-fpm php5-cgi && \
@@ -50,7 +53,8 @@ EXPOSE 443
 CMD ["/bin/bash", "/start.sh"]
 
 #docker build -t="username/nginx-php-5.3" .
-#docker run -d -p 80:80 --name web5.3 -v /home/vagrant/wwwroot:/home/vagrant/wwwroot username/nginx-php-5.3
-#docker exec -it web /bin/bash
+#docker run -d -p 80:80 --name web5.3 -v <sites-enabled-dir>:/etc/nginx/conf.d -v <certs-dir>:/etc/nginx/certs -v <log-dir>:/var/log/nginx -v <html-dir>:/var/www/html mytest/nginx-php-5.3
+#docker exec -it web5.3 /bin/bash
 
-#docker run -d -p 80:80 --name web5.3 -v /home/vagrant/wwwroot:/home/vagrant/wwwroot --link mysql:mysql username/nginx-php-5.3
+#php-fpm 关闭：
+#kill -INT `cat /var/run/php-fpm/php-fpm.pid`
