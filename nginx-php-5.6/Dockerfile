@@ -62,4 +62,4 @@ CMD ["/bin/bash", "/start.sh"]
 #docker exec -it web5.6 /bin/bash
 
 #php-fpm 关闭：
-#kill -INT `cat /var/run/php-fpm/php-fpm.pid`
+#kill -INT `cat /var/run/php5-fpm.pid`

@@ -49,11 +49,13 @@ VOLUME ["/etc/mysql", "/var/lib/mysql"]
 # Define working directory.
 WORKDIR /data
 
-# Define default command.
-CMD ["mysqld_safe"]
+ADD $PWD/start.sh /start.sh
 
 # Expose ports.
 EXPOSE 3306
+
+# Define default command.
+CMD ["/bin/bash", "/start.sh"]
 
 #Usage
 
