@@ -41,6 +41,8 @@ RUN \
   apt-get install -y php5-fpm php5-cgi && \
   apt-get install -y php5-mysql php5-gd php5-mcrypt
 
+# if [ -f /etc/php5/fpm/php.ini ]; then sed -i 's/^\(short_open_tag\s.*\)/short_open_tag = On/' /etc/php5/fpm/php.ini; fi
+
 RUN \
   rm -rf /var/lib/apt/lists/*
 
