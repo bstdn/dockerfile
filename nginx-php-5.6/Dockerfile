@@ -31,7 +31,8 @@ RUN \
 # Install Nginx.
 RUN \
   apt-get install -y nginx && \
-  chown -R www-data:www-data /var/lib/nginx
+  chown -R www-data:www-data /var/lib/nginx && \
+  usermod -u 1000 www-data
 
 # Define mountable directories.
 VOLUME ["/etc/nginx/sites-enabled", "/etc/nginx/certs", "/etc/nginx/conf.d", "/var/log/nginx", "/var/www/html"]
