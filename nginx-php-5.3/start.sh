@@ -3,4 +3,4 @@
 nginx
 php5-fpm
 
-while true; do sleep 1; done
+tail -f /var/log/nginx/error.log
