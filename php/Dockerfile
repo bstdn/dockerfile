@@ -31,9 +31,10 @@ RUN \
 # Install Php5-fpm.
 RUN \
   apt-get install -y php5-fpm php5-cgi && \
-  rm -rf /var/lib/apt/lists/*
-
-# if [ -f /etc/php5/fpm/php.ini ]; then sed -i 's/^\(short_open_tag\s.*\)/short_open_tag = On/' /etc/php5/fpm/php.ini; fi
+  apt-get install -y php5-mysql php5-gd php5-mcrypt && \
+  apt-get install -y php5-curl php5-redis mysql-client-core-5.5 && \
+  rm -rf /var/lib/apt/lists/* && \
+  sed -i 's/^\(listen\s.*\)/# \1\nlisten = 0.0.0.0:9000/' /etc/php5/fpm/pool.d/www.conf
 
 # Define working directory.
 WORKDIR /etc/php5
@@ -46,3 +47,6 @@ CMD ["/bin/bash", "/start.sh"]
 #docker build -t="username/php" .
 
 #docker run -d --name php -v /home/vagrant/wwwroot:/home/vagrant/wwwroot username/php
+
+#php-fpm 关闭：
+#kill -INT `cat /var/run/php5-fpm.pid`

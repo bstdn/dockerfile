@@ -40,7 +40,8 @@ VOLUME ["/etc/nginx/sites-enabled", "/etc/nginx/certs", "/etc/nginx/conf.d", "/v
 # Install Php5-fpm.
 RUN \
   apt-get install -y php5-fpm php5-cgi && \
-  apt-get install -y php5-mysql php5-gd php5-mcrypt
+  apt-get install -y php5-mysql php5-gd php5-mcrypt && \
+  apt-get install -y php5-curl php5-redis mysql-client-core-5.5 && \
 
 RUN \
   rm -rf /var/lib/apt/lists/*

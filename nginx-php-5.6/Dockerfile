@@ -45,11 +45,12 @@ RUN \
 # Install Php5-fpm.
 RUN \
   apt-get install -y php5-fpm php5-cgi && \
-  apt-get install -y php5-mysql php5-gd php5-mcrypt
+  apt-get install -y php5-mysql php5-gd php5-mcrypt && \
+  apt-get install -y php5-curl php5-redis mysql-client-core-5.5 && \
 
 RUN \
   rm -rf /var/lib/apt/lists/* && \
-  sed -i 's/^\(short_open_tag\s.*\)/short_open_tag = On/' /etc/php5/fpm/php.ini;
+  sed -i 's/^\(short_open_tag\s.*\)/short_open_tag = On/' /etc/php5/fpm/php.ini
 
 # Expose ports.
 EXPOSE 80
