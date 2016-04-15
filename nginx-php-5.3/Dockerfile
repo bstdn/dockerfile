@@ -42,17 +42,16 @@ RUN \
   apt-get install -y php5-fpm php5-cgi && \
   apt-get install -y php5-mysql php5-gd php5-mcrypt
 
-# if [ -f /etc/php5/fpm/php.ini ]; then sed -i 's/^\(short_open_tag\s.*\)/short_open_tag = On/' /etc/php5/fpm/php.ini; fi
-
 RUN \
   rm -rf /var/lib/apt/lists/*
-
-ADD $PWD/start.sh /start.sh
 
 # Expose ports.
 EXPOSE 80
 EXPOSE 443
 
+ADD $PWD/start.sh /start.sh
+
+# Define default command.
 CMD ["/bin/bash", "/start.sh"]
 
 #docker build -t="username/nginx-php-5.3" .

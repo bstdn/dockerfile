@@ -43,10 +43,10 @@ VOLUME ["/data"]
 # Define working directory.
 WORKDIR /data
 
-ADD $PWD/start.sh /start.sh
-
 # Expose ports.
 EXPOSE 6379
+
+ADD $PWD/start.sh /start.sh
 
 # Define default command.
 CMD ["/bin/bash", "/start.sh"]

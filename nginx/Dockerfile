@@ -42,12 +42,14 @@ RUN \
 # Define working directory.
 WORKDIR /etc/nginx
 
-# Define default command.
-CMD ["nginx"]
-
 # Expose ports.
 EXPOSE 80
 EXPOSE 443
+
+ADD $PWD/start.sh /start.sh
+
+# Define default command.
+CMD ["/bin/bash", "/start.sh"]
 
 #docker build -t="username/nginx" .
 #Usage
