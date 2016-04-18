@@ -39,6 +39,7 @@ RUN \
   apt-get install -y php5-mysql php5-gd php5-mcrypt && \
   apt-get install -y php5-curl php5-redis mysql-client-core-5.5 && \
   rm -rf /var/lib/apt/lists/* && \
+  usermod -u 1000 www-data && \
   sed -i 's/^\(short_open_tag\s.*\)/short_open_tag = On/' /etc/php5/fpm/php.ini && \
   sed -i 's/^\(listen\s.*\)/# \1\nlisten = 0.0.0.0:9000/' /etc/php5/fpm/pool.d/www.conf
 
