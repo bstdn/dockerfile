@@ -26,7 +26,7 @@ RUN echo "deb http://mirrors.163.com/ubuntu/ precise main restricted\n" \
 RUN apt-get update
 
 RUN \
-  apt-get install -y vim curl inetutils-ping
+  apt-get install -y vim curl inetutils-ping net-tools
 
 # Install MySQL.
 RUN \
