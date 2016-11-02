@@ -28,7 +28,7 @@ RUN apt-get update
 RUN \
   apt-get install -y vim curl inetutils-ping net-tools
 
-# Install MySQL.
+# Install Redis.
 RUN \
   apt-get install -y redis-server && \
   rm -rf /var/lib/apt/lists/* && \

@@ -33,6 +33,7 @@ RUN \
   apt-get install -y nginx && \
   rm -rf /var/lib/apt/lists/* && \
   #echo "\ndaemon off;" >> /etc/nginx/nginx.conf && \
+  sed -i 's/\(sendfile\s.*\)/sendfile off;/' /etc/nginx/nginx.conf
   chown -R www-data:www-data /var/lib/nginx
 
 # Define mountable directories.
