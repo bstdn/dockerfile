@@ -1,0 +1,33 @@
+iphp53:
+    image: mytest/php
+    hostname: php-5-3
+    volumes:
+      - /wwwroot:/wwwroot
+    expose:
+      - "9000"
+
+iphp56:
+    image: mytest/php-5.6
+    hostname: php-5-6
+    volumes:
+      - /wwwroot:/wwwroot
+    expose:
+      - "9000"
+
+inginx:
+    image: mytest/nginx
+    hostname: nginx-1-1-9
+    volumes:
+      - /wwwroot:/wwwroot
+      - /wwwroot/web/dockerfile/nginx-php/conf.d:/etc/nginx/conf.d
+    ports:
+      - "80:80"
+    links:
+      - iphp53
+      - iphp56
+
+#docker run -d --name iphp53 -h php-5-3 -v /wwwroot:/wwwroot mytest/php
+
+#docker run -d --name iphp56 -h php-5-6 -v /wwwroot:/wwwroot mytest/php-5.6
+
+#docker run -d -p 80:80 --name inginx -h nginx-1-1-9 -v /wwwroot:/wwwroot -v /wwwroot/web/dockerfile/nginx-php/conf.d:/etc/nginx/conf.d --link iphp53:iphp53 --link iphp56:iphp56 mytest/nginx
