@@ -1,33 +1,105 @@
+# docker volume
+#docker run -d --name dbdata -h dbdata -v ~/Documents/wwwroot:/home/vagrant/wwwroot -v ~/Documents/Downloads:/home/vagrant/Downloads -v ~/Documents/wwwroot/web/dockerfile/nginx-php/conf.d:/etc/nginx/conf.d ubuntu:12.04
+
+idbdata:
+  image: ubuntu:12.04
+  hostname: idbdata
+  volumes:
+    - ~/Documents/wwwroot:/home/vagrant/wwwroot
+    - ~/Documents/Downloads:/home/vagrant/Downloads
+    - ~/Documents/Downloads/databases/mysql:/var/lib/mysql
+    - ~/Documents/wwwroot/web/dockerfile/nginx-php/conf.d:/etc/nginx/conf.d
+
+imysql55:
+  image: mysql:5.5
+  hostname: mysql-5-5
+  volumes_from:
+    - idbdata
+  # expose:
+  #   - "3306"
+  ports:
+    - "3306:3306"
+  environment:
+    MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+
+#docker run -d -p 3306:3306 --name imysql55 -h mysql-5-5 --volumes-from idbdata mytest/mysql-5.5 /bin/bash /start.sh
+
+iredis22:
+  image: redis
+  hostname: redis-2-2
+  # volumes_from:
+  #   - idbdata
+  expose:
+    - "6379"
+  ports:
+    - "6379:6379"
+
+#docker run -d -p 6379:6379 --name iredis22 -h redis-2-2 --volumes-from idbdata mytest/redis-2.2 /bin/bash /start.sh
+
 iphp53:
-    image: mytest/php
-    hostname: php-5-3
-    volumes:
-      - /wwwroot:/wwwroot
-    expose:
-      - "9000"
+  image: mytest/php
+  hostname: php-5-3
+  volumes_from:
+    - idbdata
+#    volumes:
+#      - ~/Documents/wwwroot:/home/vagrant/wwwroot
+  expose:
+    - "9000"
+  links:
+    - imysql55
+    - iredis22
+
+#docker run -d -p 9000:9000 --name iphp53 -h php-5-3 --volumes-from idbdata -link imysql55:imysql55 --link iredis22:iredis22 mytest/php /bin/bash /start.sh
 
 iphp56:
-    image: mytest/php-5.6
-    hostname: php-5-6
-    volumes:
-      - /wwwroot:/wwwroot
-    expose:
-      - "9000"
+  image: mytest/php-5.6
+  hostname: php-5-6
+  volumes_from:
+    - idbdata
+#    volumes:
+#      - ~/Documents/wwwroot:/home/vagrant/wwwroot
+  expose:
+    - "9000"
+  links:
+    - imysql55
+    - iredis22
+
+#docker run -d -p 9000:9000 --name iphp56 -h php-5-6 --volumes-from idbdata --link imysql55:imysql55 --link iredis22:iredis22 mytest/php-5.6 /bin/bash /start.sh
+
+# iphp7:
+#     image: mytest/php-7
+#     hostname: php-7
+#     volumes_from:
+#       - idbdata
+# #    volumes:
+# #      - ~/Documents/wwwroot:/home/vagrant/wwwroot
+#     expose:
+#       - "9000"
+#     links:
+#       - imysql55
+#       - iredis22
 
 inginx:
-    image: mytest/nginx
-    hostname: nginx-1-1-9
-    volumes:
-      - /wwwroot:/wwwroot
-      - /wwwroot/web/dockerfile/nginx-php/conf.d:/etc/nginx/conf.d
-    ports:
-      - "80:80"
-    links:
-      - iphp53
-      - iphp56
+  image: mytest/nginx
+  hostname: nginx-1-1-9
+  volumes_from:
+    - idbdata
+#    volumes:
+#      - ~/Documents/wwwroot:/home/vagrant/wwwroot
+#      - ~/Documents/wwwroot/web/dockerfile/nginx-php/conf.d:/etc/nginx/conf.d
+  ports:
+    - "80:80"
+  links:
+    - imysql55
+    - iredis22
+    - iphp53
+    - iphp56
+    # - iphp7
 
-#docker run -d --name iphp53 -h php-5-3 -v /wwwroot:/wwwroot mytest/php
+#docker run -d -p 80:80 --name inginx -h nginx-1-1-9 --volumes-from idbdata --link imysql55:imysql55 --link iredis22:iredis22 --link iphp53:iphp53 --link iphp56:iphp56 mytest/nginx /bin/bash /start.sh
 
-#docker run -d --name iphp56 -h php-5-6 -v /wwwroot:/wwwroot mytest/php-5.6
+#docker run -d --name iphp53 -h php-5-3 -v ~/Documents/wwwroot:/home/vagrant/wwwroot mytest/php
 
-#docker run -d -p 80:80 --name inginx -h nginx-1-1-9 -v /wwwroot:/wwwroot -v /wwwroot/web/dockerfile/nginx-php/conf.d:/etc/nginx/conf.d --link iphp53:iphp53 --link iphp56:iphp56 mytest/nginx
+#docker run -d --name iphp56 -h php-5-6 -v ~/Documents/wwwroot:/home/vagrant/wwwroot mytest/php-5.6
+
+#docker run -d -p 80:80 --name inginx -h nginx-1-1-9 -v ~/Documents/wwwroot:/home/vagrant/wwwroot -v ~/Documents/wwwroot/web/dockerfile/nginx-php/conf.d:/etc/nginx/conf.d --link iphp53:iphp53 --link iphp56:iphp56 mytest/nginx
