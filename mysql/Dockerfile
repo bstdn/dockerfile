@@ -70,3 +70,6 @@ CMD ["/bin/bash", "/start.sh"]
 #docker run -it --rm --link mysql:mysql username/mysql bash -c 'mysql -h $MYSQL_PORT_3306_TCP_ADDR'
 
 #docker run -d --name mysql -p 3306:3306 -v /home/vagrant/wwwroot/dbdata/mysql:/data username/mysql
+
+#Stop mysql
+#mysqladmin shutdown
