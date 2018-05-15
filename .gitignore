@@ -1,0 +1,11 @@
+.DS_Store
+.idea
+
+centos/nginx-php/conf.d/*
+!centos/nginx-php/conf.d/docker.cn.conf
+
+nginx-php/conf.d/*
+!nginx-php/conf.d/docker.cn.conf
+
+nginx-php-5.6/sites-enabled/*
+!nginx-php-5.6/sites-enabled/docker.cn.conf
