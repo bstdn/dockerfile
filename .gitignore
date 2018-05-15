@@ -9,3 +9,10 @@ nginx-php/conf.d/*
 
 nginx-php-5.6/sites-enabled/*
 !nginx-php-5.6/sites-enabled/docker.cn.conf
+
+official/nginx/conf.d/*
+!official/nginx/conf.d/docker.cn.conf
+official/mysql/mysql.conf
+official/nginx/nginx.conf
+official/php-5.6/php.ini
+official/docker-compose.yml

@@ -1,0 +1,56 @@
+
+idbdata:
+  image: ubuntu:12.04
+  hostname: idbdata
+  volumes:
+    - ~/Documents/wwwroot:/home/vagrant/wwwroot
+    - ~/Documents/Downloads:/home/vagrant/Downloads
+    - ~/Documents/Downloads/databases/mysql:/var/lib/mysql
+    - ./nginx/conf.d:/etc/nginx/conf.d
+
+imysql55:
+  image: mysql:5.5
+  hostname: mysql55
+  volumes_from:
+    - idbdata
+  ports:
+    - "3306:3306"
+  volumes:
+    - ./mysql/mysql.conf:/etc/mysql/mysql.conf
+  environment:
+    MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+
+iredis22:
+  image: redis
+  hostname: redis-2-2
+  expose:
+    - "6379"
+  ports:
+    - "6379:6379"
+
+iphp56:
+  image: official/php-5.6
+  hostname: php-5-6
+  volumes_from:
+    - idbdata
+  expose:
+    - "9000"
+  volumes:
+    - ./php-5.6/php.ini:/usr/local/etc/php/php.ini
+  links:
+    - imysql55
+    - iredis22
+
+inginx:
+  image: nginx
+  hostname: inginx
+  volumes_from:
+    - idbdata
+  ports:
+    - "80:80"
+  volumes:
+    - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+  links:
+    - imysql55
+    - iredis22
+    - iphp56
