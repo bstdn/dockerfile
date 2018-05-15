@@ -1,0 +1,25 @@
+# docker volume
+#docker run -d --name dbdata -h dbdata -v ~/Documents/wwwroot:/home/vagrant/wwwroot -v ~/Documents/Downloads:/home/vagrant/Downloads -v ~/Documents/wwwroot/web/dockerfile/nginx-php/conf.d:/etc/nginx/conf.d ubuntu:12.04
+
+imysql55:
+  image: mytest/mysql-5.5
+  hostname: mysql-5-5
+  volumes_from:
+    - dbdata
+  expose:
+    - "3306"
+  ports:
+    - "3306:3306"
+
+ipython3:
+  image: davidjfelix/python3.5
+  hostname: python3
+  volumes_from:
+    - dbdata
+  ports:
+    - "80:80"
+  links:
+    - imysql55
+
+#docker start nginxphp_imysql55_1
+#docker run -d -p 80:80 -h python3 --name python3 --volumes-from dbdata --link nginxphp_imysql55_1:imysql55 davidjfelix/python3.5 /bin/bash -c "while true; do sleep 1; done"
