@@ -1,0 +1,10 @@
+web:
+    image: mytest/nginx-php-5.6
+    hostname: nginx-php-5-6
+    volumes:
+     - ~/Documents/wwwroot:/home/vagrant/wwwroot
+     - ./sites-enabled:/etc/nginx/conf.d
+    ports:
+        - "80:80"
+
+#docker run -d -p 80:80 -h nginx-php-5-6 -v ~/Documents/wwwroot:/home/vagrant/wwwroot -v ./sites-enabled:/etc/nginx/conf.d mytest/nginx-php-5.6
