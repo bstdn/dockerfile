@@ -20,9 +20,9 @@ imysql55:
   environment:
     MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
 
-iredis22:
+iredis:
   image: redis
-  hostname: redis-2-2
+  hostname: redis
   expose:
     - "6379"
   ports:
@@ -39,7 +39,7 @@ iphp56:
     - ./php-5.6/php.ini:/usr/local/etc/php/php.ini
   links:
     - imysql55
-    - iredis22
+    - iredis
 
 iphp7:
   image: official/php-7
@@ -52,7 +52,7 @@ iphp7:
     - ./php-7/php.ini:/usr/local/etc/php/php.ini
   links:
     - imysql55
-    - iredis22
+    - iredis
 
 inginx:
   image: nginx
@@ -65,6 +65,6 @@ inginx:
     - ./nginx/nginx.conf:/etc/nginx/nginx.conf
   links:
     - imysql55
-    - iredis22
+    - iredis
     - iphp56
     - iphp7
