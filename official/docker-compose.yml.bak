@@ -16,28 +16,32 @@ imysql55:
   ports:
     - "3306:3306"
   volumes:
-    - ./mysql/mysql.conf:/etc/mysql/mysql.conf
+    - ./mysql/mysql.conf:/etc/mysql/conf.d/mysql.conf
   environment:
     MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
 
 iredis:
   image: redis
   hostname: redis
-  expose:
-    - "6379"
+
+irabbitmq:
+  image: rabbitmq:3.6-management
+  hostname: rabbitmq-3.6-management
   ports:
-    - "6379:6379"
+    - "15672:15672"
+  environment:
+    RABBITMQ_DEFAULT_USER: "admin"
+    RABBITMQ_DEFAULT_PASS: "123456"
 
 iphp56:
   image: official/php-5.6
   hostname: php-5-6
   volumes_from:
     - idbdata
-  expose:
-    - "9000"
   volumes:
     - ./php-5.6/php.ini:/usr/local/etc/php/php.ini
   links:
+    - irabbitmq
     - imysql55
     - iredis
 
@@ -51,6 +55,7 @@ iphp7:
   volumes:
     - ./php-7/php.ini:/usr/local/etc/php/php.ini
   links:
+    - irabbitmq
     - imysql55
     - iredis
 
@@ -64,6 +69,7 @@ inginx:
   volumes:
     - ./nginx/nginx.conf:/etc/nginx/nginx.conf
   links:
+    - irabbitmq
     - imysql55
     - iredis
     - iphp56
