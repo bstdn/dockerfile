@@ -59,6 +59,20 @@ iphp7:
     - imysql55
     - iredis
 
+iphp72:
+  image: official/php-7.2
+  hostname: php-7-2
+  volumes_from:
+    - idbdata
+  expose:
+    - "9000"
+  volumes:
+    - ./php-7.2/php.ini:/usr/local/etc/php/php.ini
+  links:
+    - irabbitmq
+    - imysql55
+    - iredis
+
 inginx:
   image: nginx
   hostname: inginx
@@ -74,3 +88,4 @@ inginx:
     - iredis
     - iphp56
     - iphp7
+    - iphp72
