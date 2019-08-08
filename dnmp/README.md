@@ -24,11 +24,11 @@
     cp docker-compose-simple.yml docker-compose.yml
     docker-compose up -d
     ```
-    > 这里使用 docker-compose-simple.yml 文件，包含Nginx、PHP7.2、PHP5.6、MySQL8、Redis5 `5`个服务
+    > 这里使用 docker-compose-simple.yml 文件，包含 Nginx、PHP7.2、PHP5.6、MySQL、Redis `5`个服务。更多服务，比如 RabbitMQ、MongoDB 等，请参考 docker-compose-full.yml 文件，把需要的拷贝到 docker-compose.yml 文件再`up`即可
 
 4. 访问在浏览器中访问：`http://localhost`，PHP代码：`./www/localhost/index.php`文件
 
-5. 如需管理服务，请在命令后面加上服务器名称，dnmp支持的服务名有：`nginx`、`php72`、`php56`、`mysql`、`redis`
+5. 如需管理服务，请在命令后面加上服务器名称，dnmp支持的服务名有：`nginx`、`php72`、`php56`、`mysql`、`redis`、`rabbitmq`、`mongodb`
 
     ```
     docker-compose up                        # 创建并且启动所有容器
