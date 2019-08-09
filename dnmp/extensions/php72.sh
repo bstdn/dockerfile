@@ -11,7 +11,10 @@ echo "============================================"
 echo
 
 if [ -z "${EXTENSIONS##*,mcrypt,*}" ]; then
-    echo "---------- mcrypt was REMOVED from PHP 7.2.0 ----------"
+    echo "---------- Install mcrypt ----------"
+    apk add --no-cache libmcrypt-dev \
+    && pecl install mcrypt-1.0.1 \
+    && docker-php-ext-enable mcrypt
 fi
 
 if [ -z "${EXTENSIONS##*,mysql,*}" ]; then
