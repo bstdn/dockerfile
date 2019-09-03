@@ -90,9 +90,9 @@ services:
       - "${RABBITMQ_HOST_PORT_C}:5672"
       - "${RABBITMQ_HOST_PORT_S}:15672"
     environment:
-      TZ: "$TZ"
       RABBITMQ_DEFAULT_USER: "${RABBITMQ_DEFAULT_USER}"
       RABBITMQ_DEFAULT_PASS: "${RABBITMQ_DEFAULT_PASS}"
+      TZ: "$TZ"
     restart: ${RABBITMQ_RESTART}
     networks:
       - default

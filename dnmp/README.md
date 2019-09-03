@@ -50,7 +50,7 @@
 打开~/.bashrc，加上：
 ```bash
 alias dnginx='docker exec -it dnmp_nginx_1 /bin/sh'
-alias dphp72='docker exec -it dnmp_php72_1 /bin/sh'
+alias dphp72='docker exec -it dnmp_php72_1 /bin/bash'
 alias dphp56='docker exec -it dnmp_php56_1 /bin/sh'
 alias dmysql='docker exec -it dnmp_mysql_1 /bin/bash'
 alias dredis='docker exec -it dnmp_redis_1 /bin/sh'
