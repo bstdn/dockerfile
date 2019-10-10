@@ -1,12 +1,18 @@
 version: "3"
 services:
   nginx:
-    image: nginx:${NGINX_VERSION}
+    build:
+      context: ./services/nginx
+      args:
+        NGINX_VERSION: ${NGINX_VERSION}
+        CONTAINER_PACKAGE_URL: ${CONTAINER_PACKAGE_URL}
+        NGINX_INSTALL_APPS: ${NGINX_INSTALL_APPS}
     ports:
       - "${NGINX_HTTP_HOST_PORT}:80"
       - "${NGINX_HTTPS_HOST_PORT}:443"
     volumes:
-      - ${SOURCE_DIR}:/var/www/html/:rw
+      - ${SOURCE_DIR}:/www/:rw
+      - ${NGINX_SSL_CERTIFICATE_DIR}:/ssl:rw
       - ${NGINX_CONFD_DIR}:/etc/nginx/conf.d/:rw
       - ${NGINX_CONF_FILE}:/etc/nginx/nginx.conf:ro
       - ${NGINX_LOG_DIR}:/var/log/nginx/:rw
@@ -16,21 +22,20 @@ services:
     networks:
       - default
 
-  php72:
+  php:
     build:
-      context: .
+      context: ./services/php
       args:
-        PHP_VERSION: ${PHP72_VERSION}
-        ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
-        PHP_EXTENSIONS: ${PHP72_EXTENSIONS}
-        MORE_EXTENSION_INSTALLER: php72.sh
+        PHP_VERSION: php:${PHP_VERSION}-fpm-alpine
+        CONTAINER_PACKAGE_URL: ${CONTAINER_PACKAGE_URL}
+        PHP_EXTENSIONS: ${PHP_EXTENSIONS}
         TZ: "$TZ"
     volumes:
-      - ${SOURCE_DIR}:/var/www/html/:rw
-      - ${PHP72_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
-      - ${PHP72_FPM_CONF_FILE}:/usr/local/etc/php-fpm.d/www.conf:rw
-      - ${PHP72_LOG_DIR}:/var/log/php
-    restart: ${PHP72_RESTART}
+      - ${SOURCE_DIR}:/www/:rw
+      - ${PHP_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
+      - ${PHP_FPM_CONF_FILE}:/usr/local/etc/php-fpm.d/www.conf:rw
+      - ${PHP_LOG_DIR}:/var/log/php
+    restart: ${PHP_RESTART}
     cap_add:
       - SYS_PTRACE
     networks:
@@ -38,19 +43,37 @@ services:
 
   php56:
     build:
-      context: .
+      context: ./services/php
       args:
-        PHP_VERSION: ${PHP56_VERSION}
-        ALPINE_REPOSITORIES: ${ALPINE_REPOSITORIES}
+        PHP_VERSION: php:${PHP56_VERSION}-fpm-alpine
+        CONTAINER_PACKAGE_URL: ${CONTAINER_PACKAGE_URL}
         PHP_EXTENSIONS: ${PHP56_EXTENSIONS}
-        MORE_EXTENSION_INSTALLER: php56.sh
         TZ: "$TZ"
     volumes:
-      - ${SOURCE_DIR}:/var/www/html/:rw
+      - ${SOURCE_DIR}:/www/:rw
       - ${PHP56_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
       - ${PHP56_FPM_CONF_FILE}:/usr/local/etc/php-fpm.d/www.conf:rw
       - ${PHP56_LOG_DIR}:/var/log/php
     restart: ${PHP56_RESTART}
+    cap_add:
+      - SYS_PTRACE
+    networks:
+      - default
+
+  php54:
+    build:
+      context: ./services/php54
+      args:
+        PHP_VERSION: php:${PHP54_VERSION}-fpm
+        CONTAINER_PACKAGE_URL: ${CONTAINER_PACKAGE_URL}
+        PHP_EXTENSIONS: ${PHP54_EXTENSIONS}
+        TZ: "$TZ"
+    volumes:
+      - ${SOURCE_DIR}:/www/:rw
+      - ${PHP54_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
+      - ${PHP54_FPM_CONF_FILE}:/usr/local/etc/php-fpm.d/www.conf:rw
+      - ${PHP54_LOG_DIR}:/var/log/php
+    restart: ${PHP54_RESTART}
     cap_add:
       - SYS_PTRACE
     networks:
@@ -71,6 +94,21 @@ services:
       MYSQL_ALLOW_EMPTY_PASSWORD: "${MYSQL_ALLOW_EMPTY_PASSWORD}"
       TZ: "$TZ"
 
+  mysql5:
+    image: mysql:${MYSQL5_VERSION}
+    ports:
+      - "${MYSQL5_HOST_PORT}:3306"
+    volumes:
+      - ${MYSQL5_CONF_FILE}:/etc/mysql/conf.d/mysql.cnf:ro
+      - ${MYSQL5_DATA_DIR}:/var/lib/mysql/:rw
+    restart: ${MYSQL5_RESTART}
+    networks:
+      - default
+    environment:
+      MYSQL_ROOT_PASSWORD: "${MYSQL5_ROOT_PASSWORD}"
+      MYSQL_ALLOW_EMPTY_PASSWORD: "${MYSQL5_ALLOW_EMPTY_PASSWORD}"
+      TZ: "$TZ"
+
   redis:
     image: redis:${REDIS_VERSION}
     ports:
@@ -84,18 +122,49 @@ services:
     networks:
       - default
 
+  memcached:
+    image: memcached:${MEMCACHED_VERSION}
+    ports:
+      - "${MEMCACHED_HOST_PORT}:11211"
+    environment:
+      MEMCACHED_CACHE_SIZE: "${MEMCACHED_CACHE_SIZE}"
+    networks:
+      - default
+
   rabbitmq:
     image: rabbitmq:${RABBITMQ_VERSION}
     ports:
       - "${RABBITMQ_HOST_PORT_C}:5672"
       - "${RABBITMQ_HOST_PORT_S}:15672"
     environment:
+      TZ: "$TZ"
       RABBITMQ_DEFAULT_USER: "${RABBITMQ_DEFAULT_USER}"
       RABBITMQ_DEFAULT_PASS: "${RABBITMQ_DEFAULT_PASS}"
-      TZ: "$TZ"
     restart: ${RABBITMQ_RESTART}
     networks:
       - default
+
+  phpmyadmin:
+    image: phpmyadmin/phpmyadmin:latest
+    ports:
+      - "${PHPMYADMIN_HOST_PORT}:80"
+    networks:
+      - default
+    environment:
+      - PMA_HOST=mysql
+      - PMA_PORT=3306
+      - TZ=$TZ
+
+  phpredisadmin:
+    image: erikdubbelboer/phpredisadmin:latest
+    ports:
+      - "${REDISMYADMIN_HOST_PORT}:80"
+    networks:
+      - default
+    environment:
+      - REDIS_1_HOST=redis
+      - REDIS_1_PORT=6379
+      - TZ=$TZ
 
   mongodb:
     image: mongo:${MONGODB_VERSION}
@@ -112,6 +181,17 @@ services:
       - default
     command:
       --auth
+
+  adminmongo:
+    image: mrvautin/adminmongo
+    ports:
+      - "${ADMINMONGO_HOST_PORT}:1234"
+    environment:
+      - HOST=0.0.0.0
+      - DB_HOST=mongodb
+      - DB_PORT=27017
+    networks:
+      - default
 
 networks:
   default:
