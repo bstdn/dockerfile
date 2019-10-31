@@ -11,18 +11,9 @@ echo "Work directory            : ${PWD}"
 echo "============================================"
 echo
 
-
-if [ "${CONTAINER_PACKAGE_URL}" != "" ]; then
-    sed -i "s/httpredir.debian.org/${CONTAINER_PACKAGE_URL}/g" /etc/apt/sources.list
-    sed -i "s/security.debian.org/${CONTAINER_PACKAGE_URL}\/debian-security/g" /etc/apt/sources.list
-fi
-
-
-if [ "${PHP_EXTENSIONS}" != "" ]; then
-    echo "---------- Update source list ----------"
-    apt-get update
-fi
-
+echo "---------- Install zip extension ----------"
+apt-get install -y zlib1g-dev unzip
+docker-php-ext-install zip
 
 export EXTENSIONS=",${PHP_EXTENSIONS},"
 
@@ -48,11 +39,6 @@ if [ -z "${EXTENSIONS##*,bz2,*}" ]; then
     echo "---------- Install bz2 ----------"
     apt-get install -y libbz2-dev
     docker-php-ext-install bz2
-fi
-
-if [ -z "${EXTENSIONS##*,zip,*}" ]; then
-    echo "---------- Install zip ----------"
-    docker-php-ext-install zip
 fi
 
 if [ -z "${EXTENSIONS##*,pcntl,*}" ]; then
@@ -171,7 +157,6 @@ if [ -z "${EXTENSIONS##*,soap,*}" ]; then
     docker-php-ext-install soap
 fi
 
-
 if [ -z "${EXTENSIONS##*,xsl,*}" ]; then
     echo "---------- Install xsl ----------"
     apt-get install -y libxml2-dev
@@ -265,7 +250,7 @@ fi
 
 if [ -z "${EXTENSIONS##*,memcached,*}" ]; then
     echo "---------- Install memcached ----------"
-    apt-get install -y libmemcached-dev zlib1g-dev
+    apt-get install -y libmemcached-dev
     pecl install memcached-2.2.0
     docker-php-ext-enable memcached
 fi

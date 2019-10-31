@@ -13,9 +13,11 @@ echo "Work directory            : ${PWD}"
 echo "============================================"
 echo
 
+if [ "${PHP_EXTENSIONS}" != "" ]; then
+    apk add --no-cache autoconf g++ libtool make curl-dev gettext-dev linux-headers
+fi
 
 export EXTENSIONS=",${PHP_EXTENSIONS},"
-
 
 #
 # Check if current php version is greater than or equal to
@@ -42,7 +44,6 @@ isPhpVersionGreaterOrEqual()
     fi
 }
 
-
 #
 # Install extension from package file(.tgz),
 # For example:
@@ -63,7 +64,6 @@ installExtensionFromTgz()
 
     docker-php-ext-enable ${extensionName} $2
 }
-
 
 if [[ -z "${EXTENSIONS##*,pdo_mysql,*}" ]]; then
     echo "---------- Install pdo_mysql ----------"
@@ -327,7 +327,6 @@ if [[ -z "${EXTENSIONS##*,igbinary,*}" ]]; then
     docker-php-ext-enable igbinary
 fi
 
-
 if [[ -z "${EXTENSIONS##*,yac,*}" ]]; then
     echo "---------- Install yac ----------"
     printf "\n" | pecl install yac-2.0.2
@@ -420,7 +419,12 @@ fi
 
 if [[ -z "${EXTENSIONS##*,redis,*}" ]]; then
     echo "---------- Install redis ----------"
-    installExtensionFromTgz redis-4.1.1
+    installExtensionFromTgz redis-5.0.2
+fi
+
+if [[ -z "${EXTENSIONS##*,apcu,*}" ]]; then
+    echo "---------- Install redis ----------"
+    installExtensionFromTgz apcu-5.1.17
 fi
 
 if [[ -z "${EXTENSIONS##*,memcached,*}" ]]; then
@@ -478,7 +482,6 @@ if [[ -z "${EXTENSIONS##*,yaf,*}" ]]; then
         installExtensionFromTgz yaf-2.3.5
     fi
 fi
-
 
 if [[ -z "${EXTENSIONS##*,swoole,*}" ]]; then
     echo "---------- Install swoole ----------"
