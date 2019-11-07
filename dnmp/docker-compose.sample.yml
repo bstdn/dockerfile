@@ -131,6 +131,7 @@ services:
 #      - "${REDIS_HOST_PORT}:6379"
 #    volumes:
 #      - ${REDIS_CONF_FILE}:/etc/redis.conf:ro
+#      - ${DATA_DIR}/redis:/data/:rw
 #    restart: ${REDIS_RESTART}
 #    entrypoint: ["redis-server", "/etc/redis.conf"]
 #    environment:
