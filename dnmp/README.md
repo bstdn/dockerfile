@@ -124,6 +124,60 @@ docker-compose up -d
 
 可用的扩展请看同文件的`env.sample`注释块说明
 
+## Host中使用php命令行（php-cli）
+
+1. 参考[bash.alias.sample](bash.alias.sample)示例文件，将对应 php cli 函数拷贝到主机的 `~/.bashrc`文件。
+2. 让文件起效：
+    ```bash
+    source ~/.bashrc
+    ```
+3. 然后就可以在主机中执行php命令了：
+    ```bash
+    ~ php -v
+    PHP 7.2.19 (cli) (built: Jun 28 2019 03:58:08) ( NTS )
+    Copyright (c) 1997-2018 The PHP Group
+    Zend Engine v3.2.0, Copyright (c) 1998-2018 Zend Technologies
+        with Zend OPcache v7.2.19, Copyright (c) 1999-2018, by Zend Technologies
+        with Xdebug v2.6.1, Copyright (c) 2002-2018, by Derick Rethans
+    ```
+
+## 使用composer
+
+**方法一：主机中使用composer命令**
+1. 确定composer缓存的路径。比如，我的dnmp下载在`~/dnmp`目录，那composer的缓存路径就是`~/dnmp/data/composer`。
+2. 参考[bash.alias.sample](bash.alias.sample)示例文件，将对应 php composer 函数拷贝到主机的 `~/.bashrc`文件。
+    > 这里需要注意的是，示例文件中的`~/dnmp/data/composer`目录需是第一步确定的目录。
+3. 让文件起效：
+    ```bash
+    source ~/.bashrc
+    ```
+4. 在主机的任何目录下就能用composer了：
+    ```bash
+    cd ~/dnmp/www/
+    composer create-project yeszao/fastphp project --no-dev
+    ```
+5. （可选）第一次使用 composer 会在 `~/dnmp/data/composer` 目录下生成一个**config.json**文件，可以在这个文件中指定国内仓库，例如：
+    ```json
+    {
+        "config": {},
+        "repositories": {
+            "packagist": {
+                "type": "composer",
+                "url": "https://packagist.laravel-china.org"
+            }
+        }
+    }
+
+    ```
+**方法二：容器内使用composer命令**
+
+还有另外一种方式，就是进入容器，再执行`composer`命令，以PHP7容器为例：
+```bash
+docker exec -it php /bin/sh
+cd /www/localhost
+composer update
+```
+
 ## 使用Log
 
 Log文件生成的位置依赖于conf下各log配置的值。
