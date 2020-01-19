@@ -14,7 +14,7 @@ echo "============================================"
 echo
 
 if [ "${PHP_EXTENSIONS}" != "" ]; then
-    apk add --no-cache autoconf g++ libtool make curl-dev gettext-dev linux-headers
+    apk --update add --no-cache --virtual .build-deps autoconf g++ libtool make curl-dev gettext-dev linux-headers
 fi
 
 export EXTENSIONS=",${PHP_EXTENSIONS},"
@@ -194,9 +194,23 @@ fi
 
 if [[ -z "${EXTENSIONS##*,gd,*}" ]]; then
     echo "---------- Install gd ----------"
-    apk add --no-cache freetype-dev libjpeg-turbo-dev libpng-dev \
-    && docker-php-ext-configure gd --with-freetype-dir=/usr/include/ --with-jpeg-dir=/usr/include/ \
-    && docker-php-ext-install ${MC} gd
+    apk add --no-cache \
+        freetype \
+        freetype-dev \
+        libpng \
+        libpng-dev \
+        libjpeg-turbo \
+        libjpeg-turbo-dev \
+    && docker-php-ext-configure gd \
+        --with-gd \
+        --with-freetype-dir=/usr/include/ \
+        --with-png-dir=/usr/include/ \
+        --with-jpeg-dir=/usr/include/ \
+    && docker-php-ext-install ${MC} gd \
+    && apk del \
+        freetype-dev \
+        libpng-dev \
+        libjpeg-turbo-dev
 fi
 
 if [[ -z "${EXTENSIONS##*,intl,*}" ]]; then
@@ -333,6 +347,17 @@ if [[ -z "${EXTENSIONS##*,yac,*}" ]]; then
     docker-php-ext-enable yac
 fi
 
+if [[ -z "${EXTENSIONS##*,yar,*}" ]]; then
+    isPhpVersionGreaterOrEqual 7 0
+    if [[ "$?" = "1" ]]; then
+        echo "---------- Install yar ----------"
+        printf "\n" | pecl install yar
+        docker-php-ext-enable yar
+    else
+        echo "yar requires PHP >= 7.0.0, installed version is ${PHP_VERSION}"
+    fi
+fi
+
 if [[ -z "${EXTENSIONS##*,yaconf,*}" ]]; then
     echo "---------- Install yaconf ----------"
     printf "\n" | pecl install yaconf
@@ -447,6 +472,16 @@ if [[ -z "${EXTENSIONS##*,memcached,*}" ]]; then
     docker-php-ext-enable memcached
 fi
 
+if [[ -z "${EXTENSIONS##*,memcache,*}" ]]; then
+    echo "---------- Install memcache ----------"
+    isPhpVersionGreaterOrEqual 7 0
+    if [[ "$?" = "1" ]]; then
+        installExtensionFromTgz memcache-4.0.5.2
+    else
+        installExtensionFromTgz memcache-2.2.6
+    fi
+fi
+
 if [[ -z "${EXTENSIONS##*,xdebug,*}" ]]; then
     echo "---------- Install xdebug ----------"
     isPhpVersionGreaterOrEqual 7 0
@@ -525,4 +560,21 @@ if [[ -z "${EXTENSIONS##*,xhprof,*}" ]]; then
     else
        echo "---------- PHP Version>= 7.0----------"
     fi
+fi
+
+if [[ -z "${EXTENSIONS##*,xlswriter,*}" ]]; then
+    echo "---------- Install xlswriter ----------"
+    isPhpVersionGreaterOrEqual 7 0
+
+    if [[ "$?" = "1" ]]; then
+        printf "\n" | pecl install xlswriter
+        docker-php-ext-enable xlswriter
+    else
+        echo "---------- PHP Version>= 7.0----------"
+    fi
+fi
+
+if [ "${PHP_EXTENSIONS}" != "" ]; then
+    apk del .build-deps \
+    && docker-php-source delete
 fi
