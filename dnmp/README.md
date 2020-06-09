@@ -27,7 +27,7 @@
     $ docker-compose up                                 # 启动
     ```
 
-4. 访问在浏览器中访问：`http://localhost`，PHP代码：`./www/localhost/index.php`文件
+4. 在浏览器中访问：`http://localhost`，PHP代码在文件`./www/localhost/index.php`
 
 5. 如需管理服务，请在命令后面加上服务器名称，例如：
 
