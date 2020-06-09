@@ -199,9 +199,9 @@ if [[ -z "${EXTENSIONS##*,gd,*}" ]]; then
     if [[ "$?" = "1" ]]; then
         # "--with-xxx-dir" was removed from php 7.4,
         # issue: https://github.com/docker-library/php/issues/912
-        options="--with-freetype --with-jpeg"
+        options="--with-freetype --with-jpeg --with-webp"
     else
-        options="--with-gd --with-freetype-dir=/usr/include/ --with-png-dir=/usr/include/ --with-jpeg-dir=/usr/include/"
+        options="--with-gd --with-freetype-dir=/usr/include/ --with-png-dir=/usr/include/ --with-jpeg-dir=/usr/include/ --with-webp-dir=/usr/include/"
     fi
 
     apk add --no-cache \
@@ -211,6 +211,7 @@ if [[ -z "${EXTENSIONS##*,gd,*}" ]]; then
         libpng-dev \
         libjpeg-turbo \
         libjpeg-turbo-dev \
+        libwebp-dev \
     && docker-php-ext-configure gd ${options} \
     && docker-php-ext-install ${MC} gd \
     && apk del \
@@ -348,9 +349,14 @@ if [[ -z "${EXTENSIONS##*,igbinary,*}" ]]; then
 fi
 
 if [[ -z "${EXTENSIONS##*,yac,*}" ]]; then
-    echo "---------- Install yac ----------"
-    printf "\n" | pecl install yac-2.0.2
-    docker-php-ext-enable yac
+    isPhpVersionGreaterOrEqual 7 0
+    if [[ "$?" = "1" ]]; then
+        echo "---------- Install yac ----------"
+        printf "\n" | pecl install yac-2.0.2
+        docker-php-ext-enable yac
+    else
+        echo "yar requires PHP >= 7.0.0, installed version is ${PHP_VERSION}"
+    fi
 fi
 
 if [[ -z "${EXTENSIONS##*,yar,*}" ]]; then
@@ -365,9 +371,14 @@ if [[ -z "${EXTENSIONS##*,yar,*}" ]]; then
 fi
 
 if [[ -z "${EXTENSIONS##*,yaconf,*}" ]]; then
-    echo "---------- Install yaconf ----------"
-    printf "\n" | pecl install yaconf
-    docker-php-ext-enable yaconf
+    isPhpVersionGreaterOrEqual 7 0
+    if [[ "$?" = "1" ]]; then
+        echo "---------- Install yaconf ----------"
+        printf "\n" | pecl install yaconf
+        docker-php-ext-enable yaconf
+    else
+        echo "yar requires PHP >= 7.0.0, installed version is ${PHP_VERSION}"
+    fi
 fi
 
 if [[ -z "${EXTENSIONS##*,seaslog,*}" ]]; then
