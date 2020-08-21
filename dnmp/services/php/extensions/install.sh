@@ -116,6 +116,7 @@ fi
 
 if [[ -z "${EXTENSIONS##*,gettext,*}" ]]; then
     echo "---------- Install gettext ----------"
+    apk --no-cache add gettext-dev
     docker-php-ext-install ${MC} gettext
 fi
 
@@ -639,6 +640,27 @@ if [[ -z "${EXTENSIONS##*,phalcon,*}" ]]; then
         printf "\n" | pecl install phalcon
         docker-php-ext-enable psr
         docker-php-ext-enable phalcon
+    else
+        echo "---------- PHP Version>= 7.2----------"
+    fi
+fi
+
+if [[ -z "${EXTENSIONS##*,sdebug,*}" ]]; then
+    echo "---------- Install sdebug ----------"
+    isPhpVersionGreaterOrEqual 7 2
+
+    if [[ "$?" = "1" ]]; then
+                curl -SL "https://github.com/swoole/sdebug/archive/sdebug_2_9-beta.tar.gz" -o sdebug.tar.gz \
+             && mkdir -p sdebug \
+             && tar -xf sdebug.tar.gz -C sdebug --strip-components=1 \
+             && rm sdebug.tar.gz \
+             && ( \
+                 cd sdebug \
+                 && phpize \
+                 && ./configure  --enable-xdebug \
+                 && make clean && make && make install \
+             ) \
+             && docker-php-ext-enable xdebug
     else
         echo "---------- PHP Version>= 7.2----------"
     fi
