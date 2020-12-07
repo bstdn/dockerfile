@@ -221,6 +221,13 @@ if [[ -z "${EXTENSIONS##*,gd,*}" ]]; then
         libjpeg-turbo-dev
 fi
 
+if [[ -z "${EXTENSIONS##*,yaml,*}" ]]; then
+    echo "---------- Install yaml ----------"
+    apk add --no-cache yaml-dev
+    printf "\n" | pecl install yaml
+    docker-php-ext-enable yaml
+fi
+
 if [[ -z "${EXTENSIONS##*,intl,*}" ]]; then
     echo "---------- Install intl ----------"
     apk add --no-cache icu-dev
@@ -353,6 +360,18 @@ if [[ -z "${EXTENSIONS##*,igbinary,*}" ]]; then
     echo "---------- Install igbinary ----------"
     printf "\n" | pecl install igbinary
     docker-php-ext-enable igbinary
+fi
+
+if [[ -z "${EXTENSIONS##*,ssh2,*}" ]]; then
+    isPhpVersionGreaterOrEqual 7 0
+    if [[ "$?" = "1" ]]; then
+        echo "---------- Install ssh2 ----------"
+        printf "\n" | apk add libssh2-dev
+        pecl install ssh2-1.1.2
+        docker-php-ext-enable ssh2
+    else
+        echo "ssh2 requires PHP >= 7.0.0, installed version is ${PHP_VERSION}"
+    fi
 fi
 
 if [[ -z "${EXTENSIONS##*,yac,*}" ]]; then
@@ -578,7 +597,6 @@ if [[ -z "${EXTENSIONS##*,zip,*}" ]]; then
     if [[ "$?" != "1" ]]; then
         docker-php-ext-configure zip --with-libzip=/usr/include
     fi
-
     docker-php-ext-install ${MC} zip
 fi
 
