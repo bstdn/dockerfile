@@ -2,7 +2,7 @@
 
 # This script wraps docker-php-ext-install, properly configuring the system.
 #
-# Copyright (c) Michele Locati, 2018-2020
+# Copyright (c) Michele Locati, 2018-2021
 #
 # Source: https://github.com/mlocati/docker-php-extension-installer
 #
@@ -37,9 +37,30 @@ setDistro() {
 	DISTRO_MAJMIN_VERSION="$(echo "$DISTRO_VERSION_NUMBER" | awk -F. '{print $1*100+$2}')"
 }
 
-# Set the PHP_MAJMIN_VERSION variable containing the PHP Major-Minor version as an integer value, in format MMmm (example: 506 for PHP 5.6.15)
-setPHPMajorMinor() {
-	PHP_MAJMIN_VERSION=$(php-config --version | awk -F. '{print $1*100+$2}')
+# Set:
+# - PHP_MAJMIN_VERSION: Major-Minor version, format MMmm (example 800 for PHP 8.0.1)
+# - PHP_MAJMINPAT_VERSION: Major-Minor-Patch version, format MMmmpp (example 80001 for PHP 8.0.1) variables containing integers value
+setPHPVersionVariables() {
+	setPHPVersionVariables_textual="$(php-config --version)"
+	PHP_MAJMIN_VERSION=$(printf '%s' "$setPHPVersionVariables_textual" | awk -F. '{print $1*100+$2}')
+	PHP_MAJMINPAT_VERSION=$(printf '%s' "$setPHPVersionVariables_textual" | awk -F. '{print $1*10000+$2*100+$3}')
+}
+
+# Fix apt-get being very slow on Debian Jessie
+# See https://bugs.launchpad.net/ubuntu/+source/apt/+bug/1332440
+fixMaxOpenFiles() {
+	fixMaxOpenFiles_cur=$(ulimit -n 2>/dev/null || echo 0)
+	if test "$fixMaxOpenFiles_cur" -gt 10000; then
+		ulimit -n 10000
+	fi
+}
+
+# Get the directory containing the compiled PHP extensions
+#
+# Output:
+#   The absolute path of the extensions dir
+getPHPExtensionsDir() {
+	php -i | grep -E '^extension_dir' | head -n1 | tr -s '[:space:]*=>[:space:]*' '|' | cut -d'|' -f2
 }
 
 # Normalize the name of a PHP extension
@@ -57,6 +78,9 @@ normalizePHPModuleName() {
 			;;
 	esac
 	case "$normalizePHPModuleName_name" in
+		ioncube | ioncube\ loader)
+			normalizePHPModuleName_name='ioncube_loader'
+			;;
 		pecl_http)
 			normalizePHPModuleName_name='http'
 			;;
@@ -68,6 +92,55 @@ normalizePHPModuleName() {
 			;;
 	esac
 	printf '%s' "$normalizePHPModuleName_name"
+}
+
+# Parse a module name (and optionally version) as received via command arguments, extracting the version and normalizing it
+# Example:
+#   xdebug-2.9.8
+#
+# Arguments:
+#   $1: the name of the module to be normalized
+#
+# Set these variables:
+# - PROCESSED_PHP_MODULE_ARGUMENT
+#
+# Optionally set these variables:
+# - PHP_WANTEDMODULEVERSION_<...> (where <...> is the normalized module name)
+#
+# Output:
+#   Nothing
+processPHPMuduleArgument() {
+	PROCESSED_PHP_MODULE_ARGUMENT="${1%%-*}"
+	if test -n "$PROCESSED_PHP_MODULE_ARGUMENT" && test "$PROCESSED_PHP_MODULE_ARGUMENT" != "$1"; then
+		processPHPMuduleArgument_version="${1#*-}"
+	else
+		processPHPMuduleArgument_version=''
+	fi
+	PROCESSED_PHP_MODULE_ARGUMENT="$(normalizePHPModuleName "$PROCESSED_PHP_MODULE_ARGUMENT")"
+	if test -n "$processPHPMuduleArgument_version"; then
+		if printf '%s' "$PROCESSED_PHP_MODULE_ARGUMENT" | grep -Eq '^[a-zA-Z0-9_]+$'; then
+			eval PHP_WANTEDMODULEVERSION_$PROCESSED_PHP_MODULE_ARGUMENT="$processPHPMuduleArgument_version"
+		elif printf '%s' "$PROCESSED_PHP_MODULE_ARGUMENT" | grep -Eq '^@[a-zA-Z0-9_]+$'; then
+			eval PHP_WANTEDMODULEVERSION__${PROCESSED_PHP_MODULE_ARGUMENT#@}="$processPHPMuduleArgument_version"
+		else
+			printf 'Unable to parse the following module name:\n%s\n' "$PROCESSED_PHP_MODULE_ARGUMENT" >&2
+		fi
+	fi
+}
+
+# Get the wanted PHP module version, as specified in the command line arguments.
+#
+# Arguments:
+#   $1: the name of the module to be normalized
+#
+# Output:
+#   The wanted version (if any)
+getWantedPHPModuleVersion() {
+	if printf '%s' "$1" | grep -Eq '^[a-zA-Z0-9_]+$'; then
+		eval printf '%s' "\${PHP_WANTEDMODULEVERSION_$1:-}"
+	elif printf '%s' "$1" | grep -Eq '^@[a-zA-Z0-9_]+$'; then
+		eval printf '%s' "\${PHP_WANTEDMODULEVERSION__${1#@}:-}"
+	fi
 }
 
 # Set these variables:
@@ -91,6 +164,9 @@ setPHPPreinstalledModules() {
 				;;
 		esac
 	done
+	if command -v composer >/dev/null; then
+		PHP_PREINSTALLED_MODULES="$PHP_PREINSTALLED_MODULES @composer"
+	fi
 	resetIFS
 	PHP_PREINSTALLED_MODULES="${PHP_PREINSTALLED_MODULES# }"
 }
@@ -130,7 +206,8 @@ processCommandArguments() {
 			esac
 		fi
 		if test $processCommandArguments_skip -eq 0; then
-			processCommandArguments_name="$(normalizePHPModuleName "$1")"
+			processPHPMuduleArgument "$1"
+			processCommandArguments_name="$PROCESSED_PHP_MODULE_ARGUMENT"
 			if stringInList "$processCommandArguments_name" "$PHP_MODULES_TO_INSTALL"; then
 				printf '### WARNING Duplicated module name specified: %s ###\n' "$processCommandArguments_name" >&2
 			elif stringInList "$processCommandArguments_name" "$PHP_PREINSTALLED_MODULES"; then
@@ -195,6 +272,18 @@ sortModulesToInstall() {
 		PHP_MODULES_TO_INSTALL="msgpack $PHP_MODULES_TO_INSTALL"
 		PHP_MODULES_TO_INSTALL="${PHP_MODULES_TO_INSTALL% }"
 	fi
+	# Some module installation may use socket if available: move it before other modules
+	if stringInList 'socket' "$PHP_MODULES_TO_INSTALL"; then
+		PHP_MODULES_TO_INSTALL="$(removeStringFromList 'socket' "$PHP_MODULES_TO_INSTALL")"
+		PHP_MODULES_TO_INSTALL="socket $PHP_MODULES_TO_INSTALL"
+		PHP_MODULES_TO_INSTALL="${PHP_MODULES_TO_INSTALL% }"
+	fi
+	# In any case, first of all, we need to install composer
+	if stringInList '@composer' "$PHP_MODULES_TO_INSTALL"; then
+		PHP_MODULES_TO_INSTALL="$(removeStringFromList '@composer' "$PHP_MODULES_TO_INSTALL")"
+		PHP_MODULES_TO_INSTALL="@composer $PHP_MODULES_TO_INSTALL"
+		PHP_MODULES_TO_INSTALL="${PHP_MODULES_TO_INSTALL% }"
+	fi
 }
 
 # Get the required APT/APK packages for a specific PHP version and for the list of module handles
@@ -216,7 +305,9 @@ buildRequiredPackageLists() {
 	esac
 	case "$DISTRO_VERSION" in
 		alpine@*)
-			buildRequiredPackageLists_volatile="$PHPIZE_DEPS"
+			if test $# -gt 1 || test "${1:-}" != '@composer'; then
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile $PHPIZE_DEPS"
+			fi
 			if test -z "$(apk info 2>/dev/null | grep -E ^libssl)"; then
 				buildRequiredPackageLists_libssl='libssl1.0'
 			elif test -z "$(apk info 2>/dev/null | grep -E '^libressl.*-libtls')"; then
@@ -232,6 +323,9 @@ buildRequiredPackageLists() {
 			buildRequiredPackageLists_libssldev='libssl([0-9]+(\.[0-9]+)*)?-dev$'
 			;;
 	esac
+	if test $USE_PICKLE -gt 1; then
+		buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile git"
+	fi
 	while :; do
 		if test $# -lt 1; then
 			break
@@ -257,6 +351,16 @@ buildRequiredPackageLists() {
 				;;
 			cmark@debian)
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile cmake"
+				;;
+			dba@alpine)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent db"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile db-dev"
+				;;
+			dba@debian)
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libdb5.3-dev"
+				if test $PHP_MAJMIN_VERSION -le 505; then
+					buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile patch"
+				fi
 				;;
 			decimal@debian)
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libmpdec2"
@@ -323,6 +427,14 @@ buildRequiredPackageLists() {
 			gmp@debian)
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libgmp-dev"
 				;;
+			gnupg@alpine)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_volatile gpgme"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile gpgme-dev"
+				;;
+			gnupg@debian)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_volatile libgpgme[0-9]*$"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libgpgme[0-9]*-dev"
+				;;
 			grpc@alpine)
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libstdc++"
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile zlib-dev linux-headers"
@@ -356,7 +468,7 @@ buildRequiredPackageLists() {
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile imagemagick-dev"
 				;;
 			imagick@debian)
-				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libmagickwand-6.q16-[0-9]+$"
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libmagickwand-6.q16-[0-9]+ libmagickcore-6.q16-[0-9]+-extra$"
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libmagickwand-dev"
 				;;
 			imap@alpine)
@@ -397,6 +509,14 @@ buildRequiredPackageLists() {
 			ldap@debian)
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libldap2-dev"
 				;;
+			maxminddb@alpine)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libmaxminddb"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libmaxminddb-dev"
+				;;
+			maxminddb@debian)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libmaxminddb[0-9]*$"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libmaxminddb-dev"
+				;;
 			mcrypt@alpine)
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libmcrypt"
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libmcrypt-dev"
@@ -434,6 +554,14 @@ buildRequiredPackageLists() {
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libsnappy[0-9]+(v[0-9]+)?$ libicu[0-9]+$"
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libicu-dev libsasl2-dev libsnappy-dev $buildRequiredPackageLists_libssldev zlib1g-dev"
 				;;
+			mosquitto@alpine)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent mosquitto-libs"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile mosquitto-dev"
+				;;
+			mosquitto@debian)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libmosquitto1"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libmosquitto-dev"
+				;;
 			mssql@alpine)
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent freetds"
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile freetds-dev"
@@ -451,6 +579,17 @@ buildRequiredPackageLists() {
 				if test $PHP_MAJMIN_VERSION -ge 700; then
 					buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libpcre3-dev"
 				fi
+				;;
+			oci8@alpine | pdo_oci@alpine)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libaio libc6-compat libnsl"
+				if test $DISTRO_MAJMIN_VERSION -le 307; then
+					# The unzip tool of Alpine 3.7 can't extract symlinks from ZIP archives: let's use bsdtar instead
+					buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libarchive-tools"
+				fi
+				;;
+			oci8@debian | pdo_oci@debian)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libaio[0-9]*$"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile unzip"
 				;;
 			odbc@alpine)
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent unixodbc"
@@ -560,12 +699,13 @@ buildRequiredPackageLists() {
 					esac
 				fi
 				;;
-			snuffleupagus@alpine)
-				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent pcre"
-				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile pcre-dev"
+			smbclient@alpine)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libsmbclient"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile samba-dev"
 				;;
-			snuffleupagus@debian)
-				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libpcre3-dev"
+			smbclient@debian)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libsmbclient"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libsmbclient-dev"
 				;;
 			snmp@alpine)
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent net-snmp-libs"
@@ -574,6 +714,13 @@ buildRequiredPackageLists() {
 			snmp@debian)
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent snmp"
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libsnmp-dev"
+				;;
+			snuffleupagus@alpine)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent pcre"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile pcre-dev"
+				;;
+			snuffleupagus@debian)
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libpcre3-dev"
 				;;
 			soap@alpine)
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libxml2-dev"
@@ -602,6 +749,23 @@ buildRequiredPackageLists() {
 				;;
 			ssh2@debian)
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libssh2-1-dev"
+				;;
+			swoole@alpine)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent postgresql-libs libstdc++"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile curl-dev postgresql-dev linux-headers"
+				case "$DISTRO_VERSION" in
+					alpine@3.7 | alpine@3.8)
+						# I can assure you I tried very hard to enable openssl in these Alpine versions...
+						;;
+					*)
+						buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent $buildRequiredPackageLists_libssl"
+						buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libressl-dev"
+						;;
+				esac
+				;;
+			swoole@debian)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libcurl3-gnutls libpq5"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile $buildRequiredPackageLists_libssldev libcurl4-gnutls-dev libpq-dev"
 				;;
 			sybase_ct@alpine)
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent freetds"
@@ -639,6 +803,12 @@ buildRequiredPackageLists() {
 			wddx@debian)
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libxml2-dev"
 				;;
+			xlswriter@alpine)
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile zlib-dev"
+				;;
+			xlswriter@debian)
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile zlib1g-dev"
+				;;
 			xmlrpc@alpine)
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libxml2-dev"
 				;;
@@ -661,6 +831,13 @@ buildRequiredPackageLists() {
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libyaml-0-2"
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libyaml-dev"
 				;;
+			yar@alpine)
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile curl-dev"
+				;;
+			yar@debian)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libcurl3-gnutls"
+				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libcurl4-gnutls-dev"
+				;;
 			zip@alpine)
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libzip"
 				buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile cmake gnutls-dev libzip-dev libressl-dev zlib-dev"
@@ -677,6 +854,11 @@ buildRequiredPackageLists() {
 						buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libmbedtls-dev"
 						;;
 				esac
+				;;
+			zookeeper@alpine)
+				if ! test -f /usr/local/include/zookeeper/zookeeper.h; then
+					buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile apache-ant automake libtool openjdk8"
+				fi
 				;;
 			zookeeper@debian)
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libzookeeper-mt2"
@@ -802,15 +984,13 @@ getProcessorCount() {
 	fi
 }
 
-# Get the build target tripled
-# Output:
-#   The target triplet (eg x86_64-linux-gnu, i686-linux-gnu, i386-linux-gnu, ...)
-getTargetTriplet() {
-	getTargetTriplet_tmp="$(gcc -print-multiarch 2>/dev/null || true)"
-	if test -z "$getTargetTriplet_tmp"; then
-		getTargetTriplet_tmp="$(gcc -dumpmachine 2>/dev/null || true)"
+# Set these variables:
+# - TARGET_TRIPLET the build target tripled (eg 'x86_64-linux-gnu', 'x86_64-alpine-linux-musl')
+setTargetTriplet() {
+	TARGET_TRIPLET="$(gcc -print-multiarch 2>/dev/null || true)"
+	if test -z "$TARGET_TRIPLET"; then
+		TARGET_TRIPLET="$(gcc -dumpmachine)"
 	fi
-	printf '%s' "$getTargetTriplet_tmp"
 }
 
 # Retrieve the number of processors to be used when compiling an extension
@@ -895,6 +1075,82 @@ compareVersions() {
 	fi
 }
 
+# Install Oracle Instant Client & SDK
+#
+# Set:
+#   ORACLE_INSTANTCLIENT_LIBPATH
+installOracleInstantClient() {
+	if test $(php -r 'echo PHP_INT_SIZE;') -eq 4; then
+		installOracleInstantClient_client=client
+		installOracleInstantClient_version='19.9'
+		installOracleInstantClient_ic=https://download.oracle.com/otn_software/linux/instantclient/199000/instantclient-basic-linux-$installOracleInstantClient_version.0.0.0dbru.zip
+		installOracleInstantClient_sdk=https://download.oracle.com/otn_software/linux/instantclient/199000/instantclient-sdk-linux-$installOracleInstantClient_version.0.0.0dbru.zip
+	else
+		installOracleInstantClient_client=client64
+		installOracleInstantClient_version='21.1'
+		installOracleInstantClient_ic=https://download.oracle.com/otn_software/linux/instantclient/211000/instantclient-basic-linux.x64-$installOracleInstantClient_version.0.0.0.zip
+		installOracleInstantClient_sdk=https://download.oracle.com/otn_software/linux/instantclient/211000/instantclient-sdk-linux.x64-$installOracleInstantClient_version.0.0.0.zip
+	fi
+	ORACLE_INSTANTCLIENT_LIBPATH=/usr/lib/oracle/$installOracleInstantClient_version/$installOracleInstantClient_client/lib
+	if ! test -e "$ORACLE_INSTANTCLIENT_LIBPATH"; then
+		printf 'Downloading Oracle Instant Client v%s... ' "$installOracleInstantClient_version"
+		installOracleInstantClient_src="$(getPackageSource $installOracleInstantClient_ic)"
+		mkdir -p "/usr/lib/oracle/$installOracleInstantClient_version/$installOracleInstantClient_client"
+		mv "$installOracleInstantClient_src" "$ORACLE_INSTANTCLIENT_LIBPATH"
+		echo 'done.'
+	fi
+	if ! test -e "$ORACLE_INSTANTCLIENT_LIBPATH/sdk"; then
+		printf 'Downloading Oracle Instant SDK v%s... ' "$installOracleInstantClient_version"
+		installOracleInstantClient_src="$(getPackageSource $installOracleInstantClient_sdk)"
+		ln -sf "$installOracleInstantClient_src/sdk" "$ORACLE_INSTANTCLIENT_LIBPATH/sdk"
+		UNNEEDED_PACKAGE_LINKS="$UNNEEDED_PACKAGE_LINKS '$ORACLE_INSTANTCLIENT_LIBPATH/sdk'"
+		echo 'done.'
+	fi
+	case "$DISTRO" in
+		alpine)
+			if ! test -e /usr/lib/libresolv.so.2 && test -e /lib/libc.so.6; then
+				ln -s /lib/libc.so.6 /usr/lib/libresolv.so.2
+			fi
+			installOracleInstantClient_ldconf=/etc/ld-musl-${TARGET_TRIPLET%-alpine-linux-musl}.path
+			if test -e "$installOracleInstantClient_ldconf"; then
+				if ! cat "$installOracleInstantClient_ldconf" | grep -q "$ORACLE_INSTANTCLIENT_LIBPATH"; then
+					cat "$ORACLE_INSTANTCLIENT_LIBPATH" | awk -v suffix=":$ORACLE_INSTANTCLIENT_LIBPATH" '{print NR==1 ? $0suffix : $0}' >"$ORACLE_INSTANTCLIENT_LIBPATH"
+				fi
+			else
+				if test $(php -r 'echo PHP_INT_SIZE;') -eq 4; then
+					echo "/lib:/usr/local/lib:/usr/lib:$ORACLE_INSTANTCLIENT_LIBPATH" >"$installOracleInstantClient_ldconf"
+				else
+					echo "/lib64:/lib:/usr/local/lib:/usr/lib:$ORACLE_INSTANTCLIENT_LIBPATH" >"$installOracleInstantClient_ldconf"
+				fi
+			fi
+			;;
+		debian)
+			if ! test -e /etc/ld.so.conf.d/oracle-instantclient.conf; then
+				echo "$ORACLE_INSTANTCLIENT_LIBPATH" >/etc/ld.so.conf.d/oracle-instantclient.conf
+				ldconfig
+			fi
+			;;
+	esac
+}
+
+# Install Composer
+installComposer() {
+	installComposer_version="$(getWantedPHPModuleVersion @composer)"
+	if test -z "$installComposer_version"; then
+		installComposer_fullname=composer
+		installComposer_flags=''
+	else
+		installComposer_fullname="$(printf 'composer v%s' "$installComposer_version")"
+		if printf '%s' "$installComposer_version" | grep -Eq '^[0-9]+$'; then
+			installComposer_flags="--$installComposer_version"
+		else
+			installComposer_flags="--version=$installComposer_version"
+		fi
+	fi
+	printf '### INSTALLING %s ###\n' "$installComposer_fullname"
+	curl -sSLf https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer $installComposer_flags
+}
+
 # Install a bundled PHP module given its handle
 #
 # Arguments:
@@ -907,7 +1163,30 @@ compareVersions() {
 #   Nothing
 installBundledModule() {
 	printf '### INSTALLING BUNDLED MODULE %s ###\n' "$1"
+	if test -n "$(getWantedPHPModuleVersion "$1")"; then
+		printf '### WARNING the module "%s" is bundled with PHP, you can NOT specify a version for it\n' "$1" >&2
+	fi
 	case "$1" in
+		dba)
+			if test -e /usr/lib/$TARGET_TRIPLET/libdb-5.3.so && ! test -e /usr/lib/libdb-5.3.so; then
+				ln -s /usr/lib/$TARGET_TRIPLET/libdb-5.3.so /usr/lib/
+			fi
+			if test $PHP_MAJMIN_VERSION -le 505; then
+				docker-php-source extract
+				patch /usr/src/php/ext/dba/config.m4 <<EOF
+@@ -362,7 +362,7 @@
+       break
+     fi
+   done
+-  PHP_DBA_DB_CHECK(4, db-5.1 db-5.0 db-4.8 db-4.7 db-4.6 db-4.5 db-4.4 db-4.3 db-4.2 db-4.1 db-4.0 db-4 db4 db, [(void)db_create((DB**)0, (DB_ENV*)0, 0)])
++  PHP_DBA_DB_CHECK(4, db-5.3 db-5.1 db-5.0 db-4.8 db-4.7 db-4.6 db-4.5 db-4.4 db-4.3 db-4.2 db-4.1 db-4.0 db-4 db4 db, [(void)db_create((DB**)0, (DB_ENV*)0, 0)])
+ fi
+ PHP_DBA_STD_RESULT(db4,Berkeley DB4)
+
+EOF
+			fi
+			docker-php-ext-configure dba --with-db4
+			;;
 		gd)
 			if test $PHP_MAJMIN_VERSION -le 506; then
 				docker-php-ext-configure gd --with-gd --with-jpeg-dir --with-png-dir --with-zlib-dir --with-xpm-dir --with-freetype-dir --enable-gd-native-ttf --with-vpx-dir
@@ -922,7 +1201,7 @@ installBundledModule() {
 		gmp)
 			if test $PHP_MAJMIN_VERSION -le 506; then
 				if ! test -f /usr/include/gmp.h; then
-					ln -s /usr/include/x86_64-linux-gnu/gmp.h /usr/include/gmp.h
+					ln -s /usr/include/$TARGET_TRIPLET/gmp.h /usr/include/gmp.h
 					UNNEEDED_PACKAGE_LINKS="$UNNEEDED_PACKAGE_LINKS /usr/include/gmp.h"
 				fi
 			fi
@@ -962,26 +1241,30 @@ installBundledModule() {
 		ldap)
 			case "$DISTRO" in
 				debian)
-					docker-php-ext-configure ldap --with-libdir=lib/$(getTargetTriplet)
+					docker-php-ext-configure ldap --with-libdir=lib/$TARGET_TRIPLET
 					;;
 			esac
 			;;
 		mssql | pdo_dblib)
-			if test $PHP_MAJMIN_VERSION -le 704; then
-				if ! test -f /usr/lib/libsybdb.so; then
-					ln -s /usr/lib/x86_64-linux-gnu/libsybdb.so /usr/lib/libsybdb.so
-					UNNEEDED_PACKAGE_LINKS="$UNNEEDED_PACKAGE_LINKS /usr/lib/libsybdb.so"
-				fi
+			if ! test -f /usr/lib/libsybdb.so; then
+				ln -s /usr/lib/$TARGET_TRIPLET/libsybdb.so /usr/lib/libsybdb.so
+				UNNEEDED_PACKAGE_LINKS="$UNNEEDED_PACKAGE_LINKS /usr/lib/libsybdb.so"
 			fi
 			;;
 		odbc)
-			if test $PHP_MAJMIN_VERSION -le 704; then
-				docker-php-source extract
-				cd /usr/src/php/ext/odbc
-				phpize
-				sed -ri 's@^ *test +"\$PHP_.*" *= *"no" *&& *PHP_.*=yes *$@#&@g' configure
-				./configure --with-unixODBC=shared,/usr
-				cd - >/dev/null
+			docker-php-source extract
+			cd /usr/src/php/ext/odbc
+			phpize
+			sed -ri 's@^ *test +"\$PHP_.*" *= *"no" *&& *PHP_.*=yes *$@#&@g' configure
+			./configure --with-unixODBC=shared,/usr
+			cd - >/dev/null
+			;;
+		oci8 | pdo_oci)
+			installOracleInstantClient
+			if test "$1" = oci8; then
+				docker-php-ext-configure "$1" "--with-oci8=instantclient,$ORACLE_INSTANTCLIENT_LIBPATH"
+			elif test "$1" = pdo_oci; then
+				docker-php-ext-configure "$1" "--with-pdo-oci=instantclient,$ORACLE_INSTANTCLIENT_LIBPATH"
 			fi
 			;;
 		pdo_odbc)
@@ -1039,10 +1322,16 @@ installBundledModule() {
 getPackageSource() {
 	mkdir -p /tmp/src
 	getPackageSource_tempFile=$(mktemp -p /tmp/src)
-	curl -L -s -S -o "$getPackageSource_tempFile" "$1"
+	curl -sSLf -o "$getPackageSource_tempFile" "$1"
 	getPackageSource_tempDir=$(mktemp -p /tmp/src -d)
 	cd "$getPackageSource_tempDir"
-	tar -xzf "$getPackageSource_tempFile" 2>/dev/null || tar -xf "$getPackageSource_tempFile"
+	tar -xzf "$getPackageSource_tempFile" 2>/dev/null || tar -xf "$getPackageSource_tempFile" 2>/dev/null || (
+		if command -v bsdtar >/dev/null; then
+			bsdtar -xf "$getPackageSource_tempFile"
+		else
+			unzip -q "$getPackageSource_tempFile"
+		fi
+	)
 	cd - >/dev/null
 	unlink "$getPackageSource_tempFile"
 	getPackageSource_outDir=''
@@ -1060,65 +1349,65 @@ getPackageSource() {
 	fi
 }
 
-# Install a PHP module given its handle from source code
+# Install a PECL/remote PHP module given its handle
 #
 # Arguments:
 #   $1: the handle of the PHP module
-#   $2: the URL of the module source code
-#   $3: the options of the configure command
-#   $4: the value of CFLAGS
-installModuleFromSource() {
-	printf '### INSTALLING MODULE %s FROM SOURCE CODE ###\n' "$1"
-	installModuleFromSource_dir="$(getPackageSource "$2")"
-	case "$1" in
-		snuffleupagus)
-			cd "$installModuleFromSource_dir/src"
-			;;
-		*)
-			cd "$installModuleFromSource_dir"
-			;;
-	esac
-	phpize
-	./configure $3 CFLAGS="${4:-}"
-	make -j$(getProcessorCount) install
-	cd - >/dev/null
-	docker-php-ext-enable "$1"
-	case "$1" in
-		snuffleupagus)
-			cp -a "$installModuleFromSource_dir/config/default.rules" "$PHP_INI_DIR/conf.d/snuffleupagus.rules"
-			printf 'sp.configuration_file=%s\n' "$PHP_INI_DIR/conf.d/snuffleupagus.rules" >>"$PHP_INI_DIR/conf.d/docker-php-ext-snuffleupagus.ini"
-			;;
-	esac
-}
-
-# Install a PECL PHP module given its handle
-#
-# Arguments:
-#   $1: the handle of the PHP module
-installPECLModule() {
-	printf '### INSTALLING PECL MODULE %s ###\n' "$1"
-	installPECLModule_actual="$1"
+installRemoteModule() {
+	installRemoteModule_module="$1"
+	printf '### INSTALLING REMOTE MODULE %s ###\n' "$installRemoteModule_module"
+	installRemoteModule_version="$(getWantedPHPModuleVersion "$installRemoteModule_module")"
 	rm -rf "$CONFIGURE_FILE"
-	installPECLModule_manuallyInstalled=0
-	case "$1" in
+	installRemoteModule_manuallyInstalled=0
+	installRemoteModule_cppflags=''
+	case "$installRemoteModule_module" in
 		amqp)
-			case "$DISTRO_VERSION" in
-				debian@8)
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -ge 800; then
+					if test -z "$installRemoteModule_version"; then
+						installRemoteModule_version=df1241852b359cf12c346beaa68de202257efdf1
+					fi
+					installRemoteModule_src="$(getPackageSource https://codeload.github.com/php-amqp/php-amqp/tar.gz/$installRemoteModule_version)"
+					cd -- "$installRemoteModule_src"
+					phpize
+					./configure
+					make -j$(getProcessorCount)
+					make install
+					installRemoteModule_manuallyInstalled=1
+				elif test "$DISTRO_VERSION" = debian@8; then
 					# in Debian Jessie we have librammitmq version 0.5.2
-					installPECLModule_actual="$1-1.9.3"
-					;;
-			esac
+					installRemoteModule_version=1.9.3
+				elif test $PHP_MAJMIN_VERSION -le 505; then
+					installRemoteModule_version=1.9.4
+				fi
+			fi
 			;;
 		apcu)
-			if test $PHP_MAJMIN_VERSION -le 506; then
-				installPECLModule_actual="$1-4.0.11"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=4.0.11
+				fi
+			fi
+			;;
+		cmark)
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 701; then
+					installRemoteModule_version=1.1.0
+				fi
+			fi
+			if ! test -e /usr/local/lib/libcmark.so && ! test -e /usr/lib/libcmark.so && ! test -e /usr/lib64/libcmark.so && ! test -e /lib/libcmark.so; then
+				cd "$(getPackageSource https://github.com/commonmark/cmark/archive/0.29.0.tar.gz)"
+				make -s -j$(getProcessorCount) cmake_build
+				make -s -j$(getProcessorCount) install
+				cd - >/dev/null
+				ldconfig || true
 			fi
 			;;
 		decimal)
 			case "$DISTRO" in
 				alpine)
-					installPECLModule_src="$(getPackageSource https://codeload.github.com/bematech/libmpdec/tar.gz/master)"
-					cd -- "$installPECLModule_src"
+					installRemoteModule_src="$(getPackageSource https://codeload.github.com/bematech/libmpdec/tar.gz/master)"
+					cd -- "$installRemoteModule_src"
 					./configure CFLAGS='-w'
 					make -j$(getProcessorCount)
 					make install
@@ -1127,20 +1416,32 @@ installPECLModule() {
 			esac
 			;;
 		gmagick)
-			if test $PHP_MAJMIN_VERSION -le 506; then
-				installPECLModule_actual="$1-1.1.7RC3"
-			else
-				installPECLModule_actual="$1-beta"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=1.1.7RC3
+				else
+					installRemoteModule_version=beta
+				fi
+			fi
+			;;
+		grpc)
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=1.33.1
+				fi
 			fi
 			;;
 		http)
-			if test $PHP_MAJMIN_VERSION -le 506; then
-				installPECLModule_actual="pecl_http-2.6.0"
-			else
-				installPECLModule_actual="pecl_http"
+			installRemoteModule_module=pecl_http
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=2.6.0
+				fi
+			fi
+			if test $PHP_MAJMIN_VERSION -ge 700; then
 				if ! test -e /usr/local/lib/libidnkit.so; then
-					installPECLModule_src="$(getPackageSource https://jprs.co.jp/idn/idnkit-2.3.tar.bz2)"
-					cd -- "$installPECLModule_src"
+					installRemoteModule_src="$(getPackageSource https://jprs.co.jp/idn/idnkit-2.3.tar.bz2)"
+					cd -- "$installRemoteModule_src"
 					./configure
 					make -j$(getProcessorCount) install
 					cd - >/dev/null
@@ -1148,26 +1449,71 @@ installPECLModule() {
 			fi
 			;;
 		igbinary)
-			if test $PHP_MAJMIN_VERSION -lt 700; then
-				installPECLModule_actual="$1-2.0.8"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 700; then
+					installRemoteModule_version=2.0.8
+				fi
+			fi
+			;;
+		imagick)
+			if test $PHP_MAJMIN_VERSION -ge 800; then
+				if test -z "$installRemoteModule_version"; then
+					installRemoteModule_version=132a11fd26675db9eb9f0e9a3e2887c161875206
+				fi
+				if test "${installRemoteModule_version%.*}" = "$installRemoteModule_version"; then
+					installRemoteModule_displayVersion="$installRemoteModule_version"
+				else
+					installRemoteModule_displayVersion="git--master-$installRemoteModule_version"
+				fi
+				installRemoteModule_src="$(getPackageSource https://codeload.github.com/Imagick/imagick/tar.gz/$installRemoteModule_version)"
+				cd -- "$installRemoteModule_src"
+				sed -Ei "s/^([ \t]*#define[ \t]+PHP_IMAGICK_VERSION[ \t]+\")@PACKAGE_VERSION@(\")/\1git--master-$installRemoteModule_displayVersion\2/" php_imagick.h
+				phpize
+				./configure
+				make -j$(getProcessorCount)
+				make install
+				installRemoteModule_manuallyInstalled=1
+			fi
+			;;
+		ioncube_loader)
+			installRemoteModule_src='https://downloads.ioncube.com/loader_downloads/'
+			if test $(php -r 'echo PHP_INT_SIZE;') -eq 4; then
+				installRemoteModule_src="${installRemoteModule_src}ioncube_loaders_lin_x86.tar.gz"
+			else
+				installRemoteModule_src="${installRemoteModule_src}ioncube_loaders_lin_x86-64.tar.gz"
+			fi
+			printf 'Downloading ionCube Loader... '
+			installRemoteModule_src="$(getPackageSource $installRemoteModule_src)"
+			echo 'done.'
+			installRemoteModule_so=$(php -r "printf('ioncube_loader_lin_%s.%s%s.so', PHP_MAJOR_VERSION, PHP_MINOR_VERSION, ZEND_THREAD_SAFE ? '_ts' : '');")
+			cp "$installRemoteModule_src/$installRemoteModule_so" "$(getPHPExtensionsDir)/$installRemoteModule_module.so"
+			installRemoteModule_manuallyInstalled=1
+			;;
+		mailparse)
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 700; then
+					installRemoteModule_version=2.1.6
+				fi
 			fi
 			;;
 		memcache)
-			if test $PHP_MAJMIN_VERSION -lt 700; then
-				installPECLModule_actual="$1-2.2.7"
-			fi
-			;;
-		mailparse)
-			if test $PHP_MAJMIN_VERSION -lt 700; then
-				installPECLModule_actual="$1-2.1.6"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 700; then
+					installRemoteModule_version=2.2.7
+				elif test $PHP_MAJMIN_VERSION -lt 800; then
+					installRemoteModule_version=4.0.5.2
+				fi
 			fi
 			;;
 		memcached)
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 700; then
+					installRemoteModule_version=2.2.0
+				fi
+			fi
 			# Set the path to libmemcached install prefix
 			addConfigureOption 'with-libmemcached-dir' 'no'
-			if test $PHP_MAJMIN_VERSION -lt 700; then
-				installPECLModule_actual="$1-2.2.0"
-			else
+			if test -z "$installRemoteModule_version" || test $(compareVersions "$installRemoteModule_version" '3.0.0') -ge 0; then
 				# Set the path to ZLIB install prefix
 				addConfigureOption 'with-zlib-dir' 'no'
 				# Use system FastLZ library
@@ -1195,33 +1541,54 @@ installPECLModule() {
 			fi
 			;;
 		mongo)
-			# Build with Cyrus SASL (MongoDB Enterprise Authentication) support?
-			addConfigureOption '-with-mongo-sasl' 'yes'
+			if test -z "$installRemoteModule_version" || test $(compareVersions "$installRemoteModule_version" '1.5.0') -ge 0; then
+				# Build with Cyrus SASL (MongoDB Enterprise Authentication) support?
+				addConfigureOption '-with-mongo-sasl' 'yes'
+			fi
 			;;
 		mongodb)
-			if test $PHP_MAJMIN_VERSION -le 505; then
-				installPECLModule_actual="$1-1.5.5"
-			elif test $PHP_MAJMIN_VERSION -le 506; then
-				installPECLModule_actual="$1-1.7.5"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 505; then
+					installRemoteModule_version=1.5.5
+				elif test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=1.7.5
+				elif test $PHP_MAJMIN_VERSION -le 800; then
+					installRemoteModule_version=1.9.0
+				fi
+			fi
+			;;
+		mosquitto)
+			if test -z "$installRemoteModule_version"; then
+				installRemoteModule_version=0.4.0
 			fi
 			;;
 		msgpack)
-			if test $PHP_MAJMIN_VERSION -le 506; then
-				installPECLModule_actual="$1-0.5.7"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=0.5.7
+				fi
 			fi
 			;;
 		oauth)
-			if test $PHP_MAJMIN_VERSION -le 506; then
-				installPECLModule_actual="$1-1.2.3"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=1.2.3
+				fi
 			fi
 			;;
 		opencensus)
 			if test $PHP_MAJMIN_VERSION -le 702; then
-				installPECLModule_actual="$1-alpha"
+				if test -z "$installRemoteModule_version"; then
+					installRemoteModule_version=alpha
+				fi
 			else
-				installPECLModule_manuallyInstalled=1
-				installPECLModule_src="$(getPackageSource https://pecl.php.net/get/opencensus)"
-				cd "$installPECLModule_src"/opencensus-*
+				installRemoteModule_manuallyInstalled=1
+				if test -z "$installRemoteModule_version"; then
+					installRemoteModule_src="$(getPackageSource https://pecl.php.net/get/opencensus)"
+				else
+					installRemoteModule_src="$(getPackageSource https://pecl.php.net/get/opencensus-$installRemoteModule_version)"
+				fi
+				cd "$installRemoteModule_src"/opencensus-*
 				find . -name '*.c' -type f -exec sed -i 's/\bZVAL_DESTRUCTOR\b/zval_dtor/g' {} +
 				phpize
 				./configure
@@ -1230,121 +1597,288 @@ installPECLModule() {
 			fi
 			;;
 		parallel)
-			if test $PHP_MAJMIN_VERSION -le 701; then
-				installPECLModule_actual="$1-0.8.3"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 701; then
+					installRemoteModule_version=0.8.3
+				fi
 			fi
 			;;
 		pcov)
-			if test $PHP_MAJMIN_VERSION -lt 701; then
-				installPECLModule_actual="$1-0.9.0"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 701; then
+					installRemoteModule_version=0.9.0
+				fi
 			fi
 			;;
 		pdo_sqlsrv | sqlsrv)
-			# https://docs.microsoft.com/it-it/sql/connect/php/system-requirements-for-the-php-sql-driver?view=sql-server-2017
-			if test $PHP_MAJMIN_VERSION -le 700; then
-				installPECLModule_actual="$1-5.3.0"
-			elif test $PHP_MAJMIN_VERSION -le 701; then
-				installPECLModule_actual="$1-5.6.1"
+			if test -z "$installRemoteModule_version"; then
+				# https://docs.microsoft.com/it-it/sql/connect/php/system-requirements-for-the-php-sql-driver?view=sql-server-2017
+				if test $PHP_MAJMIN_VERSION -le 700; then
+					installRemoteModule_version=5.3.0
+				elif test $PHP_MAJMIN_VERSION -le 701; then
+					installRemoteModule_version=5.6.1
+				fi
 			fi
 			;;
 		propro)
-			if test $PHP_MAJMIN_VERSION -lt 700; then
-				installPECLModule_actual="$1-1.0.2"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 700; then
+					installRemoteModule_version=1.0.2
+				fi
 			fi
 			;;
 		protobuf)
-			if test $PHP_MAJMIN_VERSION -lt 700; then
-				installPECLModule_actual="$1-3.12.4"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 700; then
+					installRemoteModule_version=3.12.4
+				else
+					installRemoteModule_version=3.13.0
+				fi
 			fi
 			;;
 		pthreads)
-			if test $PHP_MAJMIN_VERSION -lt 700; then
-				installPECLModule_actual="$1-2.0.10"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 700; then
+					installRemoteModule_version=2.0.10
+				fi
 			fi
 			;;
 		raphf)
-			if test $PHP_MAJMIN_VERSION -lt 700; then
-				installPECLModule_actual="$1-1.1.2"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 700; then
+					installRemoteModule_version=1.1.2
+				fi
 			fi
 			;;
 		rdkafka)
-			if test $PHP_MAJMIN_VERSION -le 505; then
-				installPECLModule_actual="$1-3.0.5"
-			else
-				installPECLModule_tmp=
+			if test -z "$installRemoteModule_version"; then
+				installRemoteModule_version1=''
+				if test $PHP_MAJMIN_VERSION -le 505; then
+					installRemoteModule_version1=3.0.5
+				elif test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version1=4.1.2
+				fi
+				installRemoteModule_version2=''
 				case "$DISTRO" in
 					alpine)
-						installPECLModule_tmp='librdkafka'
+						installRemoteModule_tmp='librdkafka'
 						;;
 					debian)
-						installPECLModule_tmp='librdkafka*'
+						installRemoteModule_tmp='librdkafka*'
 						;;
 				esac
-				if test -n "$installPECLModule_tmp"; then
-					installPECLModule_tmp="$(getInstalledPackageVersion "$installPECLModule_tmp")"
-					if test -n "$installPECLModule_tmp"; then
-						if test $(compareVersions "$installPECLModule_tmp" '0.11.0') -lt 0; then
-							installPECLModule_actual="$1-3.1.3"
-						fi
+				if test -n "$installRemoteModule_tmp"; then
+					installRemoteModule_tmp="$(getInstalledPackageVersion "$installRemoteModule_tmp")"
+					if test -n "$installRemoteModule_tmp" && test $(compareVersions "$installRemoteModule_tmp" '0.11.0') -lt 0; then
+						installRemoteModule_version2=3.1.3
 					fi
+				fi
+				if test -z "$installRemoteModule_version1" || test -z "$installRemoteModule_version2"; then
+					installRemoteModule_version="$installRemoteModule_version1$installRemoteModule_version2"
+				elif test $(compareVersions "$installRemoteModule_version1" "$installRemoteModule_version2") -le 0; then
+					installRemoteModule_version="$installRemoteModule_version1"
+				else
+					installRemoteModule_version="$installRemoteModule_version2"
 				fi
 			fi
 			;;
 		redis)
-			if test $PHP_MAJMIN_VERSION -ge 800; then
-				installPECLModule_src="$(getPackageSource https://codeload.github.com/phpredis/phpredis/tar.gz/develop)"
-				cd -- "$installPECLModule_src"
-				installPECLModule_cmd='./configure'
-				php --ri igbinary >/dev/null 2>/dev/null && installPECLModule_cmd="$installPECLModule_cmd --enable-redis-igbinary"
-				phpize
-				$installPECLModule_cmd
-				make -j$(getProcessorCount)
-				make install
-				cd - >/dev/null
-				installPECLModule_manuallyInstalled=1
-			else
-				# Enable igbinary serializer support?
-				if php --ri igbinary >/dev/null 2>/dev/null; then
-					addConfigureOption 'enable-redis-igbinary' 'yes'
-				else
-					addConfigureOption 'enable-redis-igbinary' 'no'
-				fi
-				# Enable lzf compression support?
-				addConfigureOption 'enable-redis-lzf' 'yes'
+			if test -z "$installRemoteModule_version"; then
 				if test $PHP_MAJMIN_VERSION -le 506; then
-					installPECLModule_actual="$1-4.3.0"
-				else
-					installPECLModule_machine=$(getTargetTriplet)
-					if ! test -e /usr/include/zstd.h || ! test -e /usr/lib/libzstd.so -o -e "/usr/lib/$installPECLModule_machine/libzstd.so"; then
-						installPECLModule_zstdVersion=1.4.4
-						installPECLModule_zstdVersionMajor=$(echo $installPECLModule_zstdVersion | cut -d. -f1)
-						rm -rf /tmp/src/zstd
-						mv "$(getPackageSource https://github.com/facebook/zstd/releases/download/v1.4.4/zstd-$installPECLModule_zstdVersion.tar.gz)" /tmp/src/zstd
-						cd /tmp/src/zstd
-						make V=0 -j$(getProcessorCount) lib
-						cp -f lib/libzstd.so "/usr/lib/$installPECLModule_machine/libzstd.so.$installPECLModule_zstdVersion"
-						ln -sf "/usr/lib/$installPECLModule_machine/libzstd.so.$installPECLModule_zstdVersion" "/usr/lib/$installPECLModule_machine/libzstd.so.$installPECLModule_zstdVersionMajor"
-						ln -sf "/usr/lib/$installPECLModule_machine/libzstd.so.$installPECLModule_zstdVersion" "/usr/lib/$installPECLModule_machine/libzstd.so"
-						ln -sf /tmp/src/zstd/lib/zstd.h /usr/include/zstd.h
-						UNNEEDED_PACKAGE_LINKS="$UNNEEDED_PACKAGE_LINKS /usr/include/zstd.h"
-						cd - >/dev/null
-					fi
-					# Enable zstd compression support?
-					addConfigureOption 'enable-redis-zstd' 'yes'
+					installRemoteModule_version=4.3.0
 				fi
 			fi
+			# Enable igbinary serializer support?
+			if php --ri igbinary >/dev/null 2>/dev/null; then
+				addConfigureOption 'enable-redis-igbinary' 'yes'
+			else
+				addConfigureOption 'enable-redis-igbinary' 'no'
+			fi
+			# Enable lzf compression support?
+			addConfigureOption 'enable-redis-lzf' 'yes'
+			if test -z "$installRemoteModule_version" || test $(compareVersions "$installRemoteModule_version" '5.0.0') -ge 0; then
+				if ! test -e /usr/include/zstd.h || ! test -e /usr/lib/libzstd.so -o -e "/usr/lib/$TARGET_TRIPLET/libzstd.so"; then
+					installRemoteModule_zstdVersion=1.4.4
+					installRemoteModule_zstdVersionMajor=$(echo $installRemoteModule_zstdVersion | cut -d. -f1)
+					rm -rf /tmp/src/zstd
+					mv "$(getPackageSource https://github.com/facebook/zstd/releases/download/v1.4.4/zstd-$installRemoteModule_zstdVersion.tar.gz)" /tmp/src/zstd
+					cd /tmp/src/zstd
+					make V=0 -j$(getProcessorCount) lib
+					cp -f lib/libzstd.so "/usr/lib/$TARGET_TRIPLET/libzstd.so.$installRemoteModule_zstdVersion"
+					ln -sf "/usr/lib/$TARGET_TRIPLET/libzstd.so.$installRemoteModule_zstdVersion" "/usr/lib/$TARGET_TRIPLET/libzstd.so.$installRemoteModule_zstdVersionMajor"
+					ln -sf "/usr/lib/$TARGET_TRIPLET/libzstd.so.$installRemoteModule_zstdVersion" "/usr/lib/$TARGET_TRIPLET/libzstd.so"
+					ln -sf /tmp/src/zstd/lib/zstd.h /usr/include/zstd.h
+					UNNEEDED_PACKAGE_LINKS="$UNNEEDED_PACKAGE_LINKS /usr/include/zstd.h"
+					cd - >/dev/null
+				fi
+				# Enable zstd compression support?
+				addConfigureOption 'enable-redis-zstd' 'yes'
+			fi
+			;;
+		snuffleupagus)
+			if test -z "$installRemoteModule_version"; then
+				installRemoteModule_version=0.7.0
+			fi
+			installRemoteModule_src="$(getPackageSource https://codeload.github.com/jvoisin/snuffleupagus/tar.gz/v$installRemoteModule_version)"
+			cd "$installRemoteModule_src/src"
+			phpize
+			./configure --enable-snuffleupagus
+			make -j$(getProcessorCount) install
+			cd - >/dev/null
+			cp -a "$installRemoteModule_src/config/default.rules" "$PHP_INI_DIR/conf.d/snuffleupagus.rules"
+			installRemoteModule_manuallyInstalled=1
 			;;
 		solr)
-			if test $PHP_MAJMIN_VERSION -le 506; then
-				installPECLModule_actual="$1-2.4.0"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=2.4.0
+				fi
 			fi
 			;;
 		ssh2)
-			if test $PHP_MAJMIN_VERSION -le 506; then
-				installPECLModule_actual="$1-0.13"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=0.13
+				else
+					installRemoteModule_version=1.2
+				fi
+			fi
+			;;
+		swoole)
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 502; then
+					installRemoteModule_version=1.6.10
+				elif test $PHP_MAJMIN_VERSION -le 504; then
+					installRemoteModule_version=2.0.4
+				elif test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=2.0.11
+				elif test $PHP_MAJMIN_VERSION -le 700; then
+					installRemoteModule_version=4.3.6
+				elif test $PHP_MAJMIN_VERSION -le 701; then
+					installRemoteModule_version=4.5.10
+				fi
+			fi
+			if php --ri sockets >/dev/null 2>/dev/null; then
+				installRemoteModule_sockets=yes
 			else
-				# see https://bugs.php.net/bug.php?id=78560
-				installPECLModule_actual='https://pecl.php.net/get/ssh2'
+				installRemoteModule_sockets=no
+			fi
+			case "$DISTRO_VERSION" in
+				alpine@3.7 | alpine@3.8)
+					# I can assure you I tried very hard to enable openssl in these Alpine versions...
+					installRemoteModule_openssl=no
+					;;
+				*)
+					installRemoteModule_openssl=yes
+					;;
+			esac
+			if test -z "$installRemoteModule_version" || test $(compareVersions "$installRemoteModule_version" 4.6.1) -ge 0; then
+				# enable sockets supports?
+				addConfigureOption enable-sockets $installRemoteModule_sockets
+				# enable openssl support?
+				addConfigureOption enable-openssl $installRemoteModule_openssl
+				# enable http2 support?
+				addConfigureOption enable-http2 yes
+				# enable mysqlnd support?
+				addConfigureOption enable-mysqlnd yes
+				# enable json support?
+				addConfigureOption enable-swoole-json yes
+				# enable curl support?
+				if test $PHP_MAJMINPAT_VERSION -ne 80000; then
+					addConfigureOption enable-swoole-curl yes
+				else
+					# https://github.com/swoole/swoole-src/issues/3977#issuecomment-754755521
+					addConfigureOption enable-swoole-curl no
+				fi
+			elif test $(compareVersions "$installRemoteModule_version" 4.4.0) -ge 0; then
+				# enable sockets supports?
+				addConfigureOption enable-sockets $installRemoteModule_sockets
+				# enable openssl support?
+				addConfigureOption enable-openssl $installRemoteModule_openssl
+				# enable http2 support?
+				addConfigureOption enable-http2 yes
+				# enable mysqlnd support?
+				addConfigureOption enable-mysqlnd yes
+			elif test $(compareVersions "$installRemoteModule_version" 4.2.11) -ge 0; then
+				#enable sockets supports?
+				addConfigureOption enable-sockets $installRemoteModule_sockets
+				# enable openssl support?
+				addConfigureOption enable-openssl $installRemoteModule_openssl
+				# enable http2 support?
+				addConfigureOption enable-http2 yes
+				# enable mysqlnd support?
+				addConfigureOption enable-mysqlnd yes
+				# enable postgresql coroutine client support?
+				addConfigureOption enable-coroutine-postgresql yes
+			elif test $(compareVersions "$installRemoteModule_version" 4.2.7) -ge 0; then
+				#enable sockets supports?
+				addConfigureOption enable-sockets $installRemoteModule_sockets
+				# enable openssl support?
+				addConfigureOption enable-openssl $installRemoteModule_openssl
+				# enable http2 support?
+				addConfigureOption enable-http2 yes
+				# enable mysqlnd support?
+				addConfigureOption enable-mysqlnd yes
+				# enable postgresql coroutine client support?
+				addConfigureOption enable-coroutine-postgresql yes
+				# enable kernel debug/trace log? (it will degrade performance)
+				addConfigureOption enable-debug-log no
+			elif test $(compareVersions "$installRemoteModule_version" 4.2.6) -ge 0; then
+				# enable debug/trace log support?
+				addConfigureOption enable-debug-log no
+				#enable sockets supports?
+				addConfigureOption enable-sockets $installRemoteModule_sockets
+				# enable openssl support?
+				addConfigureOption enable-openssl $installRemoteModule_openssl
+				# enable http2 support?
+				addConfigureOption enable-http2 yes
+				# enable mysqlnd support?
+				addConfigureOption enable-mysqlnd yes
+				# enable postgresql coroutine client support?
+				addConfigureOption enable-coroutine-postgresql yes
+			elif test $(compareVersions "$installRemoteModule_version" 4.2.0) -ge 0; then
+				# enable debug/trace log support?
+				addConfigureOption enable-debug-log no
+				#enable sockets supports?
+				addConfigureOption enable-sockets $installRemoteModule_sockets
+				# enable openssl support?
+				addConfigureOption enable-openssl $installRemoteModule_openssl
+				# enable http2 support?
+				addConfigureOption enable-http2 yes
+				# enable async-redis support?
+				addConfigureOption enable-async-redis yes
+				# enable mysqlnd support?
+				addConfigureOption enable-mysqlnd yes
+				# enable postgresql coroutine client support?
+				addConfigureOption enable-coroutine-postgresql yes
+			elif test $(compareVersions "$installRemoteModule_version" 2.1.2) -ge 0; then
+				# enable debug/trace log support?
+				addConfigureOption enable-swoole-debug no
+				#enable sockets supports?
+				addConfigureOption enable-sockets $installRemoteModule_sockets
+				# enable openssl support?
+				addConfigureOption enable-openssl $installRemoteModule_openssl
+				# enable http2 support?
+				addConfigureOption enable-http2 yes
+				# enable async-redis support?
+				addConfigureOption enable-async-redis yes
+				# enable mysqlnd support?
+				addConfigureOption enable-mysqlnd yes
+				# enable postgresql coroutine client support?
+				addConfigureOption enable-coroutine-postgresql yes
+			elif test $(compareVersions "$installRemoteModule_version" 1.10.4) -ge 0 && test $(compareVersions "$installRemoteModule_version" 1.10.5) -le 0; then
+				# enable debug/trace log support?
+				addConfigureOption enable-swoole-debug no
+				#enable sockets supports?
+				addConfigureOption enable-sockets $installRemoteModule_sockets
+				# enable openssl support?
+				addConfigureOption enable-openssl $installRemoteModule_openssl
+				# enable http2 support?
+				addConfigureOption enable-http2 yes
+				# enable async-redis support?
+				addConfigureOption enable-async-redis yes
+				# enable mysqlnd support?
+				addConfigureOption enable-mysqlnd yes
 			fi
 			;;
 		tdlib)
@@ -1360,71 +1894,101 @@ installPECLModule() {
 				make install
 				cd - >/dev/null
 			fi
-			installPECLModule_tmp="$(mktemp -p /tmp/src -d)"
-			git clone --depth=1 --recurse-submodules https://github.com/yaroslavche/phptdlib.git "$installPECLModule_tmp"
-			mkdir "$installPECLModule_tmp/build"
-			cd "$installPECLModule_tmp/build"
+			installRemoteModule_tmp="$(mktemp -p /tmp/src -d)"
+			git clone --depth=1 --recurse-submodules https://github.com/yaroslavche/phptdlib.git "$installRemoteModule_tmp"
+			mkdir "$installRemoteModule_tmp/build"
+			cd "$installRemoteModule_tmp/build"
 			cmake -D USE_SHARED_PHPCPP:BOOL=ON ..
 			make
 			make install
 			rm "$PHP_INI_DIR/conf.d/tdlib.ini"
-			installPECLModule_manuallyInstalled=1
+			installRemoteModule_manuallyInstalled=1
+			;;
+		uopz)
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 700; then
+					installRemoteModule_version=2.0.7
+				elif test $PHP_MAJMIN_VERSION -lt 701; then
+					installRemoteModule_version=5.0.2
+				fi
+			fi
 			;;
 		uuid)
-			if test $PHP_MAJMIN_VERSION -le 506; then
-				installPECLModule_actual="$1-1.0.5"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=1.0.5
+				fi
 			fi
 			;;
 		xdebug)
-			if test $PHP_MAJMIN_VERSION -le 500; then
-				installPECLModule_actual="$1-2.0.5"
-			elif test $PHP_MAJMIN_VERSION -le 503; then
-				installPECLModule_actual="$1-2.2.7"
-			elif test $PHP_MAJMIN_VERSION -le 504; then
-				installPECLModule_actual="$1-2.4.1"
-			elif test $PHP_MAJMIN_VERSION -le 506; then
-				installPECLModule_actual="$1-2.5.5"
-			elif test $PHP_MAJMIN_VERSION -le 700; then
-				installPECLModule_actual="$1-2.6.1"
-			elif test $PHP_MAJMIN_VERSION -le 701; then
-				installPECLModule_actual="$1-2.9.8"
-			elif test $PHP_MAJMIN_VERSION -ge 800; then
-				# Workaround for picke problem - see https://github.com/FriendsOfPHP/pickle/issues/188 and https://github.com/FriendsOfPHP/pickle/issues/191
-				installPECLModule_src="$(getPackageSource https://codeload.github.com/xdebug/xdebug/tar.gz/3.0.0)"
-				cd -- "$installPECLModule_src"
-				phpize
-				./configure --enable-xdebug
-				make -j$(getProcessorCount)
-				make install
-				cd - >/dev/null
-				installPECLModule_manuallyInstalled=1
-			fi
-			;;
-		uopz)
-			if test $PHP_MAJMIN_VERSION -lt 700; then
-				installPECLModule_actual="$1-2.0.7"
-			elif test $PHP_MAJMIN_VERSION -lt 701; then
-				installPECLModule_actual="$1-5.0.2"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 500; then
+					installRemoteModule_version=2.0.5
+				elif test $PHP_MAJMIN_VERSION -le 503; then
+					installRemoteModule_version=2.2.7
+				elif test $PHP_MAJMIN_VERSION -le 504; then
+					installRemoteModule_version=2.4.1
+				elif test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=2.5.5
+				elif test $PHP_MAJMIN_VERSION -le 700; then
+					installRemoteModule_version=2.6.1
+				elif test $PHP_MAJMIN_VERSION -le 701; then
+					installRemoteModule_version=2.9.8
+				fi
 			fi
 			;;
 		xhprof)
-			if test $PHP_MAJMIN_VERSION -le 506; then
-				installPECLModule_actual="$1-0.9.4"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=0.9.4
+				fi
+			fi
+			;;
+		xlswriter)
+			if test -z "$installRemoteModule_version" || test $(compareVersions "$installRemoteModule_version" 1.2.7) -ge 0; then
+				# enable reader supports?
+				addConfigureOption enable-reader yes
 			fi
 			;;
 		yaml)
-			if test $PHP_MAJMIN_VERSION -lt 700; then
-				installPECLModule_actual="$1-1.3.1"
-			elif test $PHP_MAJMIN_VERSION -lt 701; then
-				installPECLModule_actual="$1-2.0.4"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 700; then
+					installRemoteModule_version=1.3.1
+				elif test $PHP_MAJMIN_VERSION -lt 701; then
+					installRemoteModule_version=2.0.4
+				fi
+			fi
+			;;
+		yar)
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=1.2.5
+				fi
+			fi
+			if test -z "$installRemoteModule_version" || test $(compareVersions "$installRemoteModule_version" 1.2.4) -ge 0; then
+				# Enable Msgpack Supports
+				if php --ri msgpack >/dev/null 2>/dev/null; then
+					addConfigureOption enable-msgpack yes
+				else
+					addConfigureOption enable-msgpack no
+				fi
 			fi
 			;;
 		zookeeper)
 			case "$DISTRO" in
 				alpine)
 					if ! test -f /usr/local/include/zookeeper/zookeeper.h; then
-						installPECLModule_src="$(getPackageSource https://downloads.apache.org/zookeeper/zookeeper-3.4.14/zookeeper-3.4.14.tar.gz)"
-						cd -- "$installPECLModule_src/zookeeper-client/zookeeper-client-c"
+						installRemoteModule_tmp="$(curl -sSLf https://downloads.apache.org/zookeeper/stable | sed -E 's/["<>]/\n/g' | grep -E '^(apache-)?zookeeper-[0-9]+\.[0-9]+\.[0-9]+\.(tar\.gz|tgz)$' | head -n1)"
+						if test -z "$installRemoteModule_tmp"; then
+							echo 'Failed to detect the zookeeper library URL' >&2
+							exit 1
+						fi
+						installRemoteModule_src="$(getPackageSource https://downloads.apache.org/zookeeper/stable/$installRemoteModule_tmp)"
+						cd -- "$installRemoteModule_src"
+						ant compile_jute
+						cd - >/dev/null
+						cd -- "$installRemoteModule_src/zookeeper-client/zookeeper-client-c"
+						autoreconf -if
 						./configure --without-cppunit
 						make -j$(getProcessorCount) CFLAGS='-Wno-stringop-truncation -Wno-format-overflow'
 						make install
@@ -1432,34 +1996,48 @@ installPECLModule() {
 					fi
 					;;
 			esac
-			if test $PHP_MAJMIN_VERSION -lt 700; then
-				installPECLModule_actual="$1-0.5.0"
-			elif test $PHP_MAJMIN_VERSION -gt 702; then
-				installPECLModule_actual="$1-0.7.2"
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -lt 700; then
+					installRemoteModule_version=0.5.0
+				elif test $PHP_MAJMIN_VERSION -gt 702; then
+					installRemoteModule_version=0.7.2
+				fi
 			fi
 			;;
 	esac
-	if test $installPECLModule_manuallyInstalled -eq 0; then
-		if test "$1" != "$installPECLModule_actual"; then
-			printf '  (installing version %s)\n' "$installPECLModule_actual"
+	if test $installRemoteModule_manuallyInstalled -eq 0; then
+		if test -n "$installRemoteModule_version"; then
+			printf '  (installing version %s)\n' "$installRemoteModule_version"
 		fi
-		installPeclPackage "$installPECLModule_actual"
+		installPeclPackage "$installRemoteModule_module" "$installRemoteModule_version" "$installRemoteModule_cppflags"
 	fi
-	case "$1" in
+	case "$installRemoteModule_module" in
 		apcu_bc)
 			# apcu_bc must be loaded after apcu
-			docker-php-ext-enable --ini-name "xx-php-ext-$1.ini" apc
+			docker-php-ext-enable --ini-name "xx-php-ext-$installRemoteModule_module.ini" apc
 			;;
-		http)
+		ioncube_loader)
+			# On PHP 5.5, docker-php-ext-enable fails to detect that ionCube Loader is a Zend Extension
+			if test $PHP_MAJMIN_VERSION -le 505; then
+				printf 'zend_extension=%s/%s.so\n' "$(getPHPExtensionsDir)" "$installRemoteModule_module" >"$PHP_INI_DIR/conf.d/docker-php-ext-$installRemoteModule_module.ini"
+			else
+				docker-php-ext-enable "$installRemoteModule_module"
+			fi
+			;;
+		pecl_http)
 			# http must be loaded after raphf and propro
-			docker-php-ext-enable --ini-name "xx-php-ext-$1.ini" "$1"
+			docker-php-ext-enable --ini-name "xx-php-ext-http.ini" http
 			;;
 		memcached)
 			# memcached must be loaded after msgpack
-			docker-php-ext-enable --ini-name "xx-php-ext-$1.ini" "$1"
+			docker-php-ext-enable --ini-name "xx-php-ext-$installRemoteModule_module.ini" "$installRemoteModule_module"
+			;;
+		snuffleupagus)
+			docker-php-ext-enable "$installRemoteModule_module"
+			printf 'sp.configuration_file=%s\n' "$PHP_INI_DIR/conf.d/snuffleupagus.rules" >>"$PHP_INI_DIR/conf.d/docker-php-ext-snuffleupagus.ini"
 			;;
 		*)
-			docker-php-ext-enable "$1"
+			docker-php-ext-enable "$installRemoteModule_module"
 			;;
 	esac
 }
@@ -1474,20 +2052,54 @@ installPECLModule() {
 configureInstaller() {
 	USE_PICKLE=0
 	for PHP_MODULE_TO_INSTALL in $PHP_MODULES_TO_INSTALL; do
+		if test "${PHP_MODULE_TO_INSTALL#@}" != "$PHP_MODULE_TO_INSTALL"; then
+			continue
+		fi
+		if test "$PHP_MODULE_TO_INSTALL" = 'amqp' && test $PHP_MAJMIN_VERSION -ge 800; then
+			continue
+		fi
+		if test "$PHP_MODULE_TO_INSTALL" = 'imagick' && test $PHP_MAJMIN_VERSION -ge 800; then
+			continue
+		fi
 		if ! stringInList "$PHP_MODULE_TO_INSTALL" "$BUNDLED_MODULES"; then
 			if test $PHP_MAJMIN_VERSION -lt 800; then
 				pecl channel-update pecl.php.net || true
 				return
 			fi
-			curl -sSL https://github.com/FriendsOfPHP/pickle/releases/latest/download/pickle.phar -o /tmp/pickle
-			chmod +x /tmp/pickle
 			if ! stringInList 'zip' "$PHP_PREINSTALLED_MODULES"; then
 				PHP_MODULES_TO_INSTALL="zip $(removeStringFromList 'zip' "$PHP_MODULES_TO_INSTALL")"
 			fi
-			USE_PICKLE=1
+			if anyStringInList 'swoole xdebug xhprof' "$PHP_MODULES_TO_INSTALL"; then
+				USE_PICKLE=2
+			else
+				curl -sSLf https://github.com/FriendsOfPHP/pickle/releases/latest/download/pickle.phar -o /tmp/pickle
+				chmod +x /tmp/pickle
+				USE_PICKLE=1
+			fi
 			return
 		fi
 	done
+}
+
+buildPickle() {
+	printf '### BUILDING PICKLE ###\n'
+	buildPickle_tempDir="$(mktemp -p /tmp/src -d)"
+	cd -- "$buildPickle_tempDir"
+	printf 'Downloading... '
+	git clone --quiet --depth 1 https://github.com/FriendsOfPHP/pickle.git .
+	git tag 0.7.0
+	printf 'done.\n'
+	printf 'Installing composer... '
+	curl -sSLf https://getcomposer.org/installer | php -- --quiet --install-dir=. --filename=composer --1
+	printf 'done.\n'
+	printf 'Installing composer dependencies... '
+	./composer install --no-dev --no-progress --no-suggest --optimize-autoloader --ignore-platform-reqs --quiet --no-cache
+	printf 'done.\n'
+	printf 'Building... '
+	php -d phar.readonly=0 box.phar build
+	mv pickle.phar /tmp/pickle
+	printf 'done.\n'
+	cd - >/dev/null
 }
 
 # Add a configure option for the pecl/pickle install command
@@ -1507,14 +2119,26 @@ addConfigureOption() {
 #
 # Arguments:
 #   $1: the package to be installed
+#   $2: the package version to be installed (optional)
+#   $3: the value of the CPPFLAGS variable
 installPeclPackage() {
 	if ! test -f "$CONFIGURE_FILE"; then
 		printf '\n' >"$CONFIGURE_FILE"
 	fi
 	if test $USE_PICKLE -eq 0; then
-		cat "$CONFIGURE_FILE" | MAKE="make -j$(getCompilationProcessorCount $1)" pecl install "$1"
+		if test -z "${2:-}"; then
+			installPeclPackage_fullname="$1"
+		else
+			installPeclPackage_fullname="$1-$2"
+		fi
+		cat "$CONFIGURE_FILE" | MAKE="make -j$(getCompilationProcessorCount $1)" CPPFLAGS="${3:-}" pecl install "$installPeclPackage_fullname"
 	else
-		MAKE="make -j$(getCompilationProcessorCount $1)" /tmp/pickle install --tmp-dir=/tmp/pickle.tmp --no-interaction --with-configure-options "$CONFIGURE_FILE" -- "$1"
+		if test -z "${2:-}"; then
+			installPeclPackage_fullname="$1"
+		else
+			installPeclPackage_fullname="$1@$2"
+		fi
+		MAKE="make -j$(getCompilationProcessorCount $1)" CPPFLAGS="${3:-}" /tmp/pickle install --tmp-dir=/tmp/pickle.tmp --no-interaction --with-configure-options "$CONFIGURE_FILE" -- "$installPeclPackage_fullname"
 	fi
 }
 
@@ -1530,6 +2154,24 @@ installPeclPackage() {
 stringInList() {
 	for stringInList_listItem in $2; do
 		if test "$1" = "$stringInList_listItem"; then
+			return 0
+		fi
+	done
+	return 1
+}
+
+# Check if at least one item in a list is in another list
+#
+# Arguments:
+#   $1: the space-separated list of items to be searched
+#   $2: the space-separated list of reference items
+#
+# Return:
+#   0 (true): at least one of the items in $1 is in $2
+#   1 (false): otherwise
+anyStringInList() {
+	for anyStringInList_item in $1; do
+		if stringInList "$anyStringInList_item" "$2"; then
 			return 0
 		fi
 	done
@@ -1609,7 +2251,12 @@ mkdir -p /tmp/pickle.tmp
 IPE_ERRFLAG_FILE="$(mktemp -p /tmp/src)"
 CONFIGURE_FILE=/tmp/configure-options
 setDistro
-setPHPMajorMinor
+case "$DISTRO_VERSION" in
+	debian@8)
+		fixMaxOpenFiles || true
+		;;
+esac
+setPHPVersionVariables
 setPHPPreinstalledModules
 case "$PHP_MAJMIN_VERSION" in
 	505 | 506 | 700 | 701 | 702 | 703 | 704 | 800) ;;
@@ -1634,31 +2281,19 @@ buildRequiredPackageLists $PHP_MODULES_TO_INSTALL
 if test -n "$PACKAGES_PERSISTENT$PACKAGES_VOLATILE"; then
 	installRequiredPackages
 fi
+if test "$PHP_MODULES_TO_INSTALL" != '@composer'; then
+	setTargetTriplet
+fi
+if test $USE_PICKLE -gt 1; then
+	buildPickle
+fi
 for PHP_MODULE_TO_INSTALL in $PHP_MODULES_TO_INSTALL; do
-	if stringInList "$PHP_MODULE_TO_INSTALL" "$BUNDLED_MODULES"; then
+	if test "$PHP_MODULE_TO_INSTALL" = '@composer'; then
+		installComposer
+	elif stringInList "$PHP_MODULE_TO_INSTALL" "$BUNDLED_MODULES"; then
 		installBundledModule "$PHP_MODULE_TO_INSTALL"
 	else
-		MODULE_SOURCE=''
-		MODULE_SOURCE_CONFIGOPTIONS=''
-		MODULE_SOURCE_CFLAGS=''
-		case "$PHP_MODULE_TO_INSTALL" in
-			cmark)
-				MODULE_SOURCE=https://github.com/krakjoe/cmark/archive/v1.0.0.tar.gz
-				cd "$(getPackageSource https://github.com/commonmark/cmark/archive/0.28.3.tar.gz)"
-				make install
-				cd - >/dev/null
-				MODULE_SOURCE_CONFIGOPTIONS=--with-cmark
-				;;
-			snuffleupagus)
-				MODULE_SOURCE="https://codeload.github.com/jvoisin/snuffleupagus/tar.gz/v0.5.0"
-				MODULE_SOURCE_CONFIGOPTIONS=--enable-snuffleupagus
-				;;
-		esac
-		if test -n "$MODULE_SOURCE"; then
-			installModuleFromSource "$PHP_MODULE_TO_INSTALL" "$MODULE_SOURCE" "$MODULE_SOURCE_CONFIGOPTIONS" "$MODULE_SOURCE_CFLAGS"
-		else
-			installPECLModule "$PHP_MODULE_TO_INSTALL"
-		fi
+		installRemoteModule "$PHP_MODULE_TO_INSTALL"
 	fi
 done
 cleanup
