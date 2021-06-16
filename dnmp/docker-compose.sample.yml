@@ -36,6 +36,8 @@ services:
     container_name: php
     expose:
       - 9501
+    extra_hosts:
+      - "www.site1.com:172.17.0.1"
     volumes:
       - ${SOURCE_DIR}:/www/:rw
       - ${PHP_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
@@ -70,7 +72,7 @@ services:
 #      - SYS_PTRACE
 #    networks:
 #      - default
-#
+
 #  php54:
 #    build:
 #      context: ./services/php54
@@ -123,7 +125,7 @@ services:
 #      MYSQL_ROOT_PASSWORD: "${MYSQL5_ROOT_PASSWORD}"
 #      MYSQL_ALLOW_EMPTY_PASSWORD: "${MYSQL_ALLOW_EMPTY_PASSWORD}"
 #      TZ: "$TZ"
-#
+
 #  redis:
 #    image: redis:${REDIS_VERSION}
 #    container_name: redis
@@ -138,7 +140,7 @@ services:
 #      TZ: "$TZ"
 #    networks:
 #      - default
-#
+
 #  memcached:
 #    image: memcached:${MEMCACHED_VERSION}
 #    container_name: memcached
@@ -148,7 +150,7 @@ services:
 #       MEMCACHED_CACHE_SIZE: "${MEMCACHED_CACHE_SIZE}"
 #    networks:
 #      - default
-#
+
 #  rabbitmq:
 #    image: rabbitmq:${RABBITMQ_VERSION}
 #    container_name: rabbitmq
@@ -177,7 +179,7 @@ services:
 #      - PMA_HOST=mysql
 #      - PMA_PORT=3306
 #      - TZ=$TZ
-#
+
 #  phpredisadmin:
 #    image: erikdubbelboer/phpredisadmin:latest
 #    container_name: phpredisadmin
@@ -189,7 +191,7 @@ services:
 #      - REDIS_1_HOST=redis
 #      - REDIS_1_PORT=6379
 #      - TZ=$TZ
-#
+
 #  mongodb:
 #    image: mongo:${MONGODB_VERSION}
 #    container_name: mongodb
@@ -206,7 +208,7 @@ services:
 #      - default
 #    command:
 #      --auth
-#
+
 #  adminmongo:
 #    image: mrvautin/adminmongo
 #    container_name: adminmongo
