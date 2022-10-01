@@ -24,6 +24,9 @@ services:
     restart: ${NGINX_RESTART}
     networks:
       - default
+      # 可以把-default 改成下列配置，以固定容器IP
+      #default:
+      #  ipv4_address: 10.0.0.10
 
   php:
     build:
@@ -49,6 +52,29 @@ services:
       - SYS_PTRACE
     networks:
       - default
+
+#  php80:
+#    build:
+#      context: ./services/php80
+#      args:
+#        PHP_VERSION: php:${PHP80_VERSION}-fpm-alpine3.13
+#        CONTAINER_PACKAGE_URL: ${CONTAINER_PACKAGE_URL}
+#        PHP_EXTENSIONS: ${PHP80_EXTENSIONS}
+#        TZ: "$TZ"
+#    container_name: php80
+#    expose:
+#      - 9501
+#    volumes:
+#      - ${SOURCE_DIR}:/www/:rw
+#      - ${PHP80_PHP_CONF_FILE}:/usr/local/etc/php/php.ini:ro
+#      - ${PHP80_FPM_CONF_FILE}:/usr/local/etc/php-fpm.d/www.conf:rw
+#      - ${PHP80_LOG_DIR}:/var/log/php
+#      - ${DATA_DIR}/composer:/tmp/composer
+#    restart: ${PHP80_RESTART}
+#    cap_add:
+#      - SYS_PTRACE
+#    networks:
+#      - default
 
 #  php56:
 #    build:
@@ -95,34 +121,38 @@ services:
 #      - default
 
   mysql:
-    image: mysql:${MYSQL_VERSION}
+    image: mysql/mysql-server:${MYSQL_VERSION}
     container_name: mysql
     ports:
       - "${MYSQL_HOST_PORT}:3306"
     volumes:
       - ${MYSQL_CONF_FILE}:/etc/mysql/conf.d/mysql.cnf:ro
       - ${DATA_DIR}/mysql:/var/lib/mysql/:rw
+      - ${MYSQL_LOG_DIR}:/var/log/mysql/:rw
     restart: ${MYSQL_RESTART}
     networks:
       - default
     environment:
       MYSQL_ROOT_PASSWORD: "${MYSQL_ROOT_PASSWORD}"
+      MYSQL_ROOT_HOST: "${MYSQL_ROOT_HOST}"
       MYSQL_ALLOW_EMPTY_PASSWORD: "${MYSQL_ALLOW_EMPTY_PASSWORD}"
       TZ: "$TZ"
 
 #  mysql5:
-#    image: mysql:${MYSQL5_VERSION}
+#    image: mysql/mysql-server:${MYSQL5_VERSION}
 #    container_name: mysql5
 #    ports:
 #      - "${MYSQL5_HOST_PORT}:3306"
 #    volumes:
 #      - ${MYSQL5_CONF_FILE}:/etc/mysql/conf.d/mysql.cnf:ro
 #      - ${DATA_DIR}/mysql5:/var/lib/mysql/:rw
+#      - ${MYSQL5_LOG_DIR}:/var/log/mysql/:rw
 #    restart: ${MYSQL5_RESTART}
 #    networks:
 #      - default
 #    environment:
 #      MYSQL_ROOT_PASSWORD: "${MYSQL5_ROOT_PASSWORD}"
+#      MYSQL_ROOT_HOST: "${MYSQL5_ROOT_HOST}"
 #      MYSQL_ALLOW_EMPTY_PASSWORD: "${MYSQL_ALLOW_EMPTY_PASSWORD}"
 #      TZ: "$TZ"
 
@@ -236,3 +266,9 @@ services:
 
 networks:
   default:
+    driver: bridge
+    ipam:
+      driver: default
+      # 解除下面的注释可以设置网段，用于nginx等容器固定容器IP
+      #config:
+      #  - subnet: 10.0.0.0/24
