@@ -219,11 +219,11 @@ set_error_handler(
 $xpath = new DOMXpath($doc);
 $xpath->registerNamespace('v20', 'http://pear.php.net/dtd/package-2.0');
 $xpath->registerNamespace('v21', 'http://pear.php.net/dtd/package-2.1');
-if ($xpath->query('/v20:package/v20:dependencies')->count() === 1) {
+if ($xpath->query('/v20:package/v20:dependencies')->length === 1) {
 	$ns = 'v20:';
-} elseif ($xpath->query('/v21:package/v21:dependencies')->count() === 1) {
+} elseif ($xpath->query('/v21:package/v21:dependencies')->length === 1) {
 	$ns = 'v21:';
-} elseif ($xpath->query('/package')->count() === 1) {
+} elseif ($xpath->query('/package')->length === 1) {
 	$ns = '';
 } else {
 	fwrite(STDERR, "Unsupported namespace of the XML of package version details\n");
@@ -532,6 +532,10 @@ sortModulesToInstall() {
 	if test $PHP_MAJMIN_VERSION -le 506; then
 		checkRequiredModule event sockets
 	fi
+	# relay requires msgpack
+	checkRequiredModule relay msgpack
+	# relay requires igbinary
+	checkRequiredModule relay igbinary
 	# Some module installation may use sockets if available: move it before other modules
 	if stringInList 'sockets' "$PHP_MODULES_TO_INSTALL"; then
 		PHP_MODULES_TO_INSTALL="$(removeStringFromList 'sockets' "$PHP_MODULES_TO_INSTALL")"
@@ -744,7 +748,10 @@ buildRequiredPackageLists() {
 					buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libwebp"
 					buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libwebp-dev"
 					if test $PHP_MAJMIN_VERSION -ge 801; then
-						if isLibaomInstalled && isLibdav1dInstalled && isLibyuvInstalled && isLibavifInstalled; then
+						if test $DISTRO_MAJMIN_VERSION -ge 315; then
+							buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libavif aom-libs libdav1d"
+							buildRequiredPackageLists_volatile="$buildRequiredPackageLists_volatile libavif-dev aom-dev dav1d-dev"
+						elif isLibaomInstalled && isLibdav1dInstalled && isLibyuvInstalled && isLibavifInstalled; then
 							buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libstdc++"
 						else
 							case "${IPE_GD_WITHOUTAVIF:-}" in
@@ -1116,6 +1123,12 @@ buildRequiredPackageLists() {
 							;;
 					esac
 				fi
+				;;
+			relay@alpine)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent lz4-libs zstd-libs"
+				;;
+			simdjson@alpine)
+				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libstdc++"
 				;;
 			smbclient@alpine)
 				buildRequiredPackageLists_persistent="$buildRequiredPackageLists_persistent libsmbclient"
@@ -1612,7 +1625,7 @@ getModuleIniEntryType() {
 #
 # Arguments:
 #   $1: the name of the PHP extension
-#   $3: additional php.ini configuration (optional)
+#   $2: additional php.ini configuration (optional)
 #
 # Output:
 #   The contents of the ini file
@@ -2214,24 +2227,37 @@ EOF
 			elif test $PHP_MAJMIN_VERSION -le 800; then
 				docker-php-ext-configure gd --enable-gd --with-webp --with-jpeg --with-xpm --with-freetype
 			else
-				case "${IPE_GD_WITHOUTAVIF:-}" in
-					1 | y* | Y*) ;;
-					*)
-						if ! isLibaomInstalled; then
-							installLibaom
-						fi
-						if ! isLibdav1dInstalled; then
-							installLibdav1d
-						fi
-						if ! isLibyuvInstalled; then
-							installLibyuv
-						fi
-						if ! isLibavifInstalled; then
-							installLibavif
+				installBundledModule_tmp=0
+				case "$DISTRO" in
+					alpine)
+						if test $DISTRO_MAJMIN_VERSION -ge 315; then
+							installBundledModule_tmp=1
 						fi
 						;;
 				esac
-				if isLibaomInstalled && isLibdav1dInstalled && isLibyuvInstalled && isLibavifInstalled; then
+				if test $installBundledModule_tmp -eq 0; then
+					case "${IPE_GD_WITHOUTAVIF:-}" in
+						1 | y* | Y*) ;;
+						*)
+							if ! isLibaomInstalled; then
+								installLibaom
+							fi
+							if ! isLibdav1dInstalled; then
+								installLibdav1d
+							fi
+							if ! isLibyuvInstalled; then
+								installLibyuv
+							fi
+							if ! isLibavifInstalled; then
+								installLibavif
+							fi
+							;;
+					esac
+					if isLibaomInstalled && isLibdav1dInstalled && isLibyuvInstalled && isLibavifInstalled; then
+						installBundledModule_tmp=1
+					fi
+				fi
+				if test $installBundledModule_tmp -eq 1; then
 					docker-php-ext-configure gd --enable-gd --with-webp --with-jpeg --with-xpm --with-freetype --with-avif
 				else
 					docker-php-ext-configure gd --enable-gd --with-webp --with-jpeg --with-xpm --with-freetype
@@ -2612,7 +2638,7 @@ installRemoteModule() {
 			case "$DISTRO" in
 				alpine)
 					if ! test -e /usr/local/include/libgearman/gearman.h || ! test -e /usr/local/lib/libgearman.so; then
-						installRemoteModule_src="$(getPackageSource https://github.com/gearman/gearmand/releases/download/1.1.19.1/gearmand-1.1.19.1.tar.gz)"
+						installRemoteModule_src="$(getPackageSource https://github.com/gearman/gearmand/releases/download/1.1.20/gearmand-1.1.20.tar.gz)"
 						cd -- "$installRemoteModule_src"
 						./configure
 						make -j$(getProcessorCount) install-binPROGRAMS
@@ -2718,7 +2744,7 @@ installRemoteModule() {
 			if ! test -f /usr/local/lib/libionc.so || ! test -f /usr/local/include/ionc/ion.h; then
 				echo 'Installing ion-c... '
 				installRemoteModule_src="$(mktemp -p /tmp/src -d)"
-				git clone -q -c advice.detachedHead=false --depth 1 --branch v1.0.6 https://github.com/amzn/ion-c.git "$installRemoteModule_src/ion"
+				git clone -q -c advice.detachedHead=false --depth 1 --branch v1.1.0 https://github.com/amzn/ion-c.git "$installRemoteModule_src/ion"
 				(
 					cd "$installRemoteModule_src/ion"
 					git submodule init -q
@@ -2924,6 +2950,8 @@ installRemoteModule() {
 			if test -z "$installRemoteModule_version"; then
 				if test $PHP_MAJMIN_VERSION -le 701; then
 					installRemoteModule_version=0.8.3
+				elif test $PHP_MAJMIN_VERSION -le 704; then
+					installRemoteModule_version=1.1.4
 				fi
 			fi
 			;;
@@ -2957,6 +2985,9 @@ installRemoteModule() {
 			if test -z "$installRemoteModule_version"; then
 				if test $PHP_MAJMIN_VERSION -le 506; then
 					installRemoteModule_version=3.12.4
+				else
+					# see https://github.com/protocolbuffers/protobuf/issues/10619
+					installRemoteModule_version=3.21.6
 				fi
 			fi
 			;;
@@ -3042,6 +3073,28 @@ installRemoteModule() {
 				addConfigureOption 'enable-redis-zstd' 'yes'
 			fi
 			;;
+		relay)
+			if test -z "$installRemoteModule_version"; then
+				installRemoteModule_version="$(curl -sSLf https://builds.r2.relay.so/meta/latest)"
+				installRemoteModule_version="${installRemoteModule_version#v}"
+			fi
+			case $(uname -m) in
+				aarch64 | arm64 | armv8)
+					installRemoteModule_hardware=aarch64
+					;;
+				*)
+					installRemoteModule_hardware=x86-64
+					;;
+			esac
+			printf 'Downloading relay v%s (%s)... ' "$installRemoteModule_version" "$installRemoteModule_hardware"
+			installRemoteModule_url="https://builds.r2.relay.so/v${installRemoteModule_version}/relay-v${installRemoteModule_version}-php${PHP_MAJDOTMIN_VERSION}-${DISTRO}-${installRemoteModule_hardware}.tar.gz"
+			installRemoteModule_src="$(getPackageSource $installRemoteModule_url)"
+			echo 'done.'
+			cp -- "$installRemoteModule_src/relay-pkg.so" "$PHP_EXTDIR/relay.so"
+			sed -i "s/00000000-0000-0000-0000-000000000000/$(cat /proc/sys/kernel/random/uuid)/" "$PHP_EXTDIR/relay.so"
+			installRemoteModule_ini_extra="$(grep -vE '^[ \t]*extension[ \t]*=' $installRemoteModule_src/relay.ini)"
+			installRemoteModule_manuallyInstalled=1
+			;;
 		snappy)
 			if test -z "$installRemoteModule_path"; then
 				if test -z "$installRemoteModule_version"; then
@@ -3100,7 +3153,7 @@ installRemoteModule() {
 		spx)
 			if test -z "$installRemoteModule_path"; then
 				if test -z "$installRemoteModule_version"; then
-					installRemoteModule_version=v0.4.12
+					installRemoteModule_version=v0.4.13
 				fi
 				if test "${installRemoteModule_version%.*}" = "$installRemoteModule_version"; then
 					installRemoteModule_displayVersion="$installRemoteModule_version"
@@ -3380,6 +3433,8 @@ installRemoteModule() {
 					installRemoteModule_version=2.6.1
 				elif test $PHP_MAJMIN_VERSION -le 701; then
 					installRemoteModule_version=2.9.8
+				elif test $PHP_MAJMIN_VERSION -le 704; then
+					installRemoteModule_version=3.1.6
 				fi
 			fi
 			;;
@@ -3503,6 +3558,13 @@ installRemoteModule() {
 					fi
 					;;
 			esac
+			;;
+		zstd)
+			if test -z "$installRemoteModule_version"; then
+				if test $PHP_MAJMIN_VERSION -le 506; then
+					installRemoteModule_version=0.11.0
+				fi
+			fi
 			;;
 	esac
 	if test $installRemoteModule_manuallyInstalled -eq 0; then

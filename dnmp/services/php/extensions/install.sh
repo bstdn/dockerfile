@@ -193,6 +193,12 @@ if [[ -z "${EXTENSIONS##*,interbase,*}" ]]; then
     #docker-php-ext-install ${MC} interbase
 fi
 
+if [[ -z "${EXTENSIONS##*,hprose,*}" ]]; then
+    echo "---------- Install hprose ----------"
+    printf "\n" | pecl install hprose
+    docker-php-ext-enable hprose
+fi
+
 if [[ -z "${EXTENSIONS##*,gd,*}" ]]; then
     echo "---------- Install gd ----------"
     isPhpVersionGreaterOrEqual 7 4
@@ -590,6 +596,9 @@ fi
 
 if [[ -z "${EXTENSIONS##*,swoole,*}" ]]; then
     echo "---------- Install swoole ----------"
+    # Fix: Refer to the line containing "swoole@alpine)" in file "./install-php-extensions"
+    apk add --no-cache libstdc++
+
     isPhpVersionGreaterOrEqual 7 0
 
     if [[ "$?" = "1" ]]; then
